@@ -27,6 +27,11 @@ function DisplayWidget:init()
     self.date_widget = nil
     self.status_widget = nil
     self.datetime_vertical_group = nil
+
+    -- Rotation handling
+    self.original_rotation = Screen:getRotationMode()
+    self:applyClockRotation()
+
     self.autoRefresh = function()
         self:refresh()
         return UIManager:scheduleIn(60 - tonumber(Date("%S")), self.autoRefresh)
@@ -52,6 +57,21 @@ function DisplayWidget:init()
     self[1] = self:render()
 end
 
+function DisplayWidget:applyClockRotation()
+    local rotation_settings = self.props and self.props.rotation
+    if rotation_settings and not rotation_settings.follow_koreader then
+        local custom = rotation_settings.custom_rotation or 0
+        Screen:setRotationMode(custom)
+    end
+end
+
+function DisplayWidget:restoreRotation()
+    if self.original_rotation then
+        Screen:setRotationMode(self.original_rotation)
+        self.original_rotation = nil
+    end
+end
+
 function DisplayWidget:refresh()
     self.now = os.time()
     self:update()
@@ -72,16 +92,22 @@ end
 
 function DisplayWidget:onTapClose()
     UIManager:unschedule(self.autoRefresh)
+    self:restoreRotation()
     UIManager:close(self)
 end
 
 DisplayWidget.onAnyKeyPressed = DisplayWidget.onTapClose
 
+function DisplayWidget:onCloseWidget()
+    -- Safety net: ensure rotation is always restored even if closed externally
+    self:restoreRotation()
+end
+
 function DisplayWidget:getWifiStatusText()
     if NetworkMgr:isWifiOn() then
-        return _("")
+        return _("")
     else
-        return _("")
+        return _("")
     end
 end
 
@@ -93,7 +119,7 @@ function DisplayWidget:getMemoryStatusText()
         statm:close()
         -- we got the nb of 4Kb-pages used, that we convert to MiB
         rss = math.floor(rss * (4096 / 1024 / 1024))
-        return T(_(" %1 MiB"), rss)
+        return T(_(" %1 MiB"), rss)
     end
 end
 
