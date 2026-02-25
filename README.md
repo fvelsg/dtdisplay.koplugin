@@ -1,6 +1,6 @@
-# dtdisplay.koplugin
+# dtdisplay.koplugin (Fork)
 
-A [koreader][1] plugin to display the time and day in a fullscreen widget.
+A [koreader][1] plugin to display the time and day in a fullscreen widget with images allowed and some other functionalities.
 
 ## Motivation
 
