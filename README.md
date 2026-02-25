@@ -26,3 +26,11 @@ Linux x86 Appimage.
 [1]: https://github.com/koreader/koreader
 [2]: https://github.com/jperon/clock.koplugin
 [3]: https://github.com/RolandColored/kobo-display
+
+
+----
+next eteps:
+- there should be a way to select the folders for each landscape and portrait pngs
+- there should be a settings to select if the person wants the screen to full refresh each time it updates the png (not the clock)
+- there should be a way to only get out of the widget when the user blocks the screen (optional)
+- there should be a possibility to put the weather plugin showing up (optional)
