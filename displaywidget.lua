@@ -8,6 +8,7 @@ local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local NetworkMgr = require("ui/network/manager")
+local OverlapGroup = require("ui/widget/overlapgroup")
 local Screen = Device.screen
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local UIManager = require("ui/uimanager")
@@ -27,6 +28,12 @@ function DisplayWidget:init()
     self.date_widget = nil
     self.status_widget = nil
     self.datetime_vertical_group = nil
+
+    -- PNG overlay state
+    self.png_overlay_widget = nil
+    self.png_cycle_index = 1
+    self.png_cycle_counter = 0
+    self.png_file_list = nil
 
     -- Rotation handling
     self.original_rotation = Screen:getRotationMode()
@@ -75,6 +82,8 @@ end
 function DisplayWidget:refresh()
     self.now = os.time()
     self:update()
+    -- Cycle PNG overlay if in cycle mode
+    self:cyclePngOverlay()
     UIManager:setDirty("all", "ui", self.datetime_vertical_group.dimen)
 end
 
@@ -198,6 +207,271 @@ function DisplayWidget:renderStatusWidget(width, font_face)
     }
 end
 
+--- Read PNG dimensions from file header without loading the full image.
+-- PNG IHDR chunk: bytes 17-24 contain width (4 bytes BE) and height (4 bytes BE).
+function DisplayWidget:getPngDimensions(filepath)
+    local f = io.open(filepath, "rb")
+    if not f then
+        return nil, nil
+    end
+    local header = f:read(24)
+    f:close()
+    if not header or #header < 24 then
+        return nil, nil
+    end
+    -- Verify PNG signature (first 8 bytes)
+    local png_sig = "\137PNG\r\n\026\n"
+    if header:sub(1, 8) ~= png_sig then
+        return nil, nil
+    end
+    -- Width at bytes 17-20, Height at bytes 21-24 (big-endian)
+    local function read_be_uint32(s, offset)
+        local b1, b2, b3, b4 = s:byte(offset, offset + 3)
+        return b1 * 16777216 + b2 * 65536 + b3 * 256 + b4
+    end
+    local w = read_be_uint32(header, 17)
+    local h = read_be_uint32(header, 21)
+    return w, h
+end
+
+--- Get the native portrait resolution of the device.
+-- Returns width, height where width < height (portrait).
+function DisplayWidget:getNativePortraitResolution()
+    local screen_size = Screen:getSize()
+    local sw, sh = screen_size.w, screen_size.h
+    -- Ensure portrait: width < height
+    if sw > sh then
+        return sh, sw
+    end
+    return sw, sh
+end
+
+--- Check if current screen orientation is portrait (0° or 180°)
+function DisplayWidget:isPortraitOrientation()
+    local screen_size = Screen:getSize()
+    return screen_size.w <= screen_size.h
+end
+
+--- Check if a PNG file has valid dimensions (matches native or inverted native resolution).
+-- Returns:
+--   "normal" if image matches portrait resolution (w x h where w < h)
+--   "inverted" if image matches landscape resolution (h x w)
+--   nil if image dimensions don't match either
+function DisplayWidget:checkPngResolution(filepath)
+    local img_w, img_h = self:getPngDimensions(filepath)
+    if not img_w or not img_h then
+        return nil
+    end
+    local native_w, native_h = self:getNativePortraitResolution()
+    if img_w == native_w and img_h == native_h then
+        return "normal"
+    elseif img_w == native_h and img_h == native_w then
+        return "inverted"
+    end
+    return nil
+end
+
+--- Get sorted list of valid PNG files from the configured folder.
+-- Each entry is a table: { filename = "...", resolution_type = "normal"|"inverted" }
+function DisplayWidget:getPngFileList()
+    if self.png_file_list then
+        return self.png_file_list
+    end
+
+    local overlay_settings = self.props and self.props.png_overlay
+    if not overlay_settings or not overlay_settings.enabled then
+        return nil
+    end
+
+    local folder = overlay_settings.folder_path
+    if not folder or folder == "" then
+        return nil
+    end
+
+    local lfs = require("libs/libkoreader-lfs")
+    local files = {}
+    local ok, iter, dir_obj = pcall(lfs.dir, folder)
+    if not ok then
+        return nil
+    end
+
+    for entry in iter, dir_obj do
+        if entry ~= "." and entry ~= ".." then
+            local lower = entry:lower()
+            if lower:match("%.png$") then
+                table.insert(files, entry)
+            end
+        end
+    end
+
+    table.sort(files)
+
+    -- Filter by resolution
+    local valid_files = {}
+    for _, fname in ipairs(files) do
+        local fpath = folder .. "/" .. fname
+        local res_type = self:checkPngResolution(fpath)
+        if res_type then
+            table.insert(valid_files, { filename = fname, resolution_type = res_type })
+        end
+    end
+
+    if #valid_files == 0 then
+        return nil
+    end
+
+    self.png_file_list = valid_files
+    return self.png_file_list
+end
+
+--- Determine the rotation angle needed for a given image resolution type.
+-- In portrait mode: inverted images need 90° rotation to fill screen.
+-- In landscape mode: never rotate.
+function DisplayWidget:getImageRotationAngle(resolution_type)
+    if not self:isPortraitOrientation() then
+        -- Landscape: never rotate
+        return 0
+    end
+    -- Portrait
+    if resolution_type == "inverted" then
+        return 90
+    end
+    return 0
+end
+
+--- Get the current PNG file path and its resolution type.
+-- Returns: filepath, resolution_type  or  nil, nil
+function DisplayWidget:getCurrentPngPathAndType()
+    local overlay_settings = self.props and self.props.png_overlay
+    if not overlay_settings or not overlay_settings.enabled then
+        return nil, nil
+    end
+
+    local mode = overlay_settings.mode or "single"
+
+    if mode == "single" then
+        local single_path = overlay_settings.single_file_path
+        if single_path and single_path ~= "" then
+            local res_type = self:checkPngResolution(single_path)
+            if res_type then
+                return single_path, res_type
+            end
+        end
+        return nil, nil
+    elseif mode == "cycle" then
+        local files = self:getPngFileList()
+        if not files or #files == 0 then
+            return nil, nil
+        end
+        local folder = overlay_settings.folder_path
+        if self.png_cycle_index > #files then
+            self.png_cycle_index = 1
+        end
+        local entry = files[self.png_cycle_index]
+        return folder .. "/" .. entry.filename, entry.resolution_type
+    end
+
+    return nil, nil
+end
+
+--- Get the configured cycle interval in minutes
+function DisplayWidget:getCycleMinutes()
+    local overlay_settings = self.props and self.props.png_overlay
+    if overlay_settings and overlay_settings.cycle_minutes then
+        return overlay_settings.cycle_minutes
+    end
+    return 1
+end
+
+--- Cycle to the next PNG image based on configured interval.
+-- Called on each refresh (~every minute).
+function DisplayWidget:cyclePngOverlay()
+    local overlay_settings = self.props and self.props.png_overlay
+    if not overlay_settings or not overlay_settings.enabled then
+        return
+    end
+    if overlay_settings.mode ~= "cycle" then
+        return
+    end
+
+    local files = self:getPngFileList()
+    if not files or #files == 0 then
+        return
+    end
+
+    self.png_cycle_counter = self.png_cycle_counter + 1
+    local cycle_minutes = self:getCycleMinutes()
+
+    if self.png_cycle_counter >= cycle_minutes then
+        self.png_cycle_counter = 0
+        self.png_cycle_index = self.png_cycle_index + 1
+        if self.png_cycle_index > #files then
+            self.png_cycle_index = 1
+        end
+
+        -- Update the overlay widget with the new image
+        self:updatePngOverlayWidget()
+        UIManager:setDirty("all", "ui")
+    end
+end
+
+--- Create the PNG overlay ImageWidget with proper rotation handling.
+function DisplayWidget:createPngOverlayWidget()
+    local png_path, res_type = self:getCurrentPngPathAndType()
+    if not png_path then
+        return nil
+    end
+
+    local ImageWidget = require("ui/widget/imagewidget")
+    local screen_size = Screen:getSize()
+    local rotation_angle = self:getImageRotationAngle(res_type)
+
+    local widget = ImageWidget:new {
+        file = png_path,
+        width = screen_size.w,
+        height = screen_size.h,
+        scale_factor = 0,
+        alpha = true,
+        rotation_angle = rotation_angle,
+    }
+
+    return widget
+end
+
+--- Update the overlay widget in-place for cycling.
+function DisplayWidget:updatePngOverlayWidget()
+    local png_path, res_type = self:getCurrentPngPathAndType()
+    if not png_path then
+        return
+    end
+
+    if self.png_overlay_widget and self.overlap_group then
+        local ImageWidget = require("ui/widget/imagewidget")
+        local screen_size = Screen:getSize()
+        local rotation_angle = self:getImageRotationAngle(res_type)
+
+        -- Free old image resources
+        if self.png_overlay_widget.free then
+            self.png_overlay_widget:free()
+        end
+
+        local new_widget = ImageWidget:new {
+            file = png_path,
+            width = screen_size.w,
+            height = screen_size.h,
+            scale_factor = 0,
+            alpha = true,
+            rotation_angle = rotation_angle,
+        }
+
+        -- Replace overlay in the overlap group (second element)
+        self.png_overlay_widget = new_widget
+        if self.overlap_group and #self.overlap_group >= 2 then
+            self.overlap_group[2] = new_widget
+        end
+    end
+end
+
 function DisplayWidget:render()
     local screen_size = Screen:getSize()
 
@@ -251,7 +525,7 @@ function DisplayWidget:render()
         spacer_widget,
     }
 
-    return FrameContainer:new {
+    local clock_frame = FrameContainer:new {
         geom = Geom:new { w = screen_size.w, screen_size.h },
         radius = 0,
         bordersize = 0,
@@ -263,6 +537,22 @@ function DisplayWidget:render()
         height = screen_size.h,
         vertical_group
     }
+
+    -- Build PNG overlay if enabled
+    self.png_overlay_widget = self:createPngOverlayWidget()
+
+    if self.png_overlay_widget then
+        -- Use OverlapGroup to layer the PNG on top of the clock
+        self.overlap_group = OverlapGroup:new {
+            dimen = Geom:new { w = screen_size.w, h = screen_size.h },
+            clock_frame,
+            self.png_overlay_widget,
+        }
+        return self.overlap_group
+    else
+        self.overlap_group = nil
+        return clock_frame
+    end
 end
 
 return DisplayWidget

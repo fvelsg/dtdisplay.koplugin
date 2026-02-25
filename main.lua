@@ -1,298 +1,404 @@
-local Blitbuffer = require("ffi/blitbuffer")
-local Date = os.date
-local Datetime = require("frontend/datetime")
+local Dispatcher = require("dispatcher")
+local DisplayWidget = require("displaywidget")
+local DataStorage = require("datastorage")
 local Device = require("device")
 local Font = require("ui/font")
-local FrameContainer = require('ui/widget/container/framecontainer')
-local Geom = require("ui/geometry")
-local GestureRange = require("ui/gesturerange")
-local InputContainer = require("ui/widget/container/inputcontainer")
-local NetworkMgr = require("ui/network/manager")
-local OverlapGroup = require("ui/widget/overlapgroup")
+local FontList = require("fontlist")
+local LuaSettings = require("frontend/luasettings")
 local Screen = Device.screen
-local TextBoxWidget = require("ui/widget/textboxwidget")
 local UIManager = require("ui/uimanager")
-local VerticalGroup = require("ui/widget/verticalgroup")
-
-local T = require("ffi/util").template
+local WidgetContainer = require("ui/widget/container/widgetcontainer")
+local cre -- delayed loading
 local _ = require("gettext")
+local T = require("ffi/util").template
 
-local DisplayWidget = InputContainer:extend {
-    props = {},
+local DtDisplay = WidgetContainer:extend {
+    name = "dtdisplay",
+    config_file = "dtdisplay_config.lua",
+    local_storage = nil,
+    is_doc_only = false,
 }
 
-function DisplayWidget:init()
-    -- Properties
-    self.now = os.time()
-    self.time_widget = nil
-    self.date_widget = nil
-    self.status_widget = nil
-    self.datetime_vertical_group = nil
+function DtDisplay:init()
+    self:initLuaSettings()
 
-    -- PNG overlay state
-    self.png_overlay_widget = nil
-    self.png_cycle_index = 1
-    self.png_cycle_counter = 0
-    self.png_file_list = nil
+    self.settings = self.local_storage.data
+    self:onDispatcherRegisterActions()
+    self.ui.menu:registerToMainMenu(self)
+end
 
-    -- Rotation handling
-    self.original_rotation = Screen:getRotationMode()
-    self:applyClockRotation()
-
-    self.autoRefresh = function()
-        self:refresh()
-        return UIManager:scheduleIn(60 - tonumber(Date("%S")), self.autoRefresh)
+function DtDisplay:initLuaSettings()
+    self.local_storage = LuaSettings:open(("%s/%s"):format(DataStorage:getSettingsDir(), self.config_file))
+    if next(self.local_storage.data) == nil then
+        self.local_storage:reset({
+            date_widget = {
+                font_name = "./fonts/noto/NotoSans-Regular.ttf",
+                font_size = 25,
+            },
+            time_widget = {
+                font_name = "./fonts/noto/NotoSans-Regular.ttf",
+                font_size = 119,
+            },
+            status_widget = {
+                font_name = "./fonts/noto/NotoSans-Regular.ttf",
+                font_size = 24,
+            },
+            rotation = {
+                follow_koreader = true,
+                custom_rotation = 0,
+            },
+            png_overlay = {
+                enabled = false,
+                folder_path = "",
+                mode = "single",
+                single_file_path = "",
+                cycle_minutes = 1,
+            },
+        })
+        self.local_storage:flush()
     end
 
-    -- Events
-    self.ges_events.TapClose = {
-        GestureRange:new {
-            ges = "tap",
-            range = Geom:new {
-                x = 0, y = 0,
-                w = Screen:getWidth(),
-                h = Screen:getHeight(),
-            }
+    -- Migration: ensure rotation settings exist for users upgrading from older config
+    if self.local_storage.data.rotation == nil then
+        self.local_storage.data.rotation = {
+            follow_koreader = true,
+            custom_rotation = 0,
         }
-    }
+        self.local_storage:flush()
+    end
 
-    -- Hints
-    self.covers_fullscreen = true
+    -- Migration: ensure png_overlay settings exist for users upgrading from older config
+    if self.local_storage.data.png_overlay == nil then
+        self.local_storage.data.png_overlay = {
+            enabled = false,
+            folder_path = "",
+            mode = "single",
+            single_file_path = "",
+            cycle_minutes = 1,
+        }
+        self.local_storage:flush()
+    end
 
-    -- Render
-    UIManager:setDirty("all", "flashpartial")
-    self[1] = self:render()
-end
-
-function DisplayWidget:applyClockRotation()
-    local rotation_settings = self.props and self.props.rotation
-    if rotation_settings and not rotation_settings.follow_koreader then
-        local custom = rotation_settings.custom_rotation or 0
-        Screen:setRotationMode(custom)
+    -- Migration: ensure cycle_minutes exists for users upgrading from previous png_overlay version
+    if self.local_storage.data.png_overlay.cycle_minutes == nil then
+        self.local_storage.data.png_overlay.cycle_minutes = 1
+        self.local_storage:flush()
     end
 end
 
-function DisplayWidget:restoreRotation()
-    if self.original_rotation then
-        Screen:setRotationMode(self.original_rotation)
-        self.original_rotation = nil
-    end
-end
-
-function DisplayWidget:refresh()
-    self.now = os.time()
-    self:update()
-    -- Cycle PNG overlay if in cycle mode
-    self:cyclePngOverlay()
-    UIManager:setDirty("all", "ui", self.datetime_vertical_group.dimen)
-end
-
-function DisplayWidget:onShow()
-    return self:autoRefresh()
-end
-
-function DisplayWidget:onResume()
-    UIManager:unschedule(self.autoRefresh)
-end
-
-function DisplayWidget:onSuspend()
-    UIManager:unschedule(self.autoRefresh)
-end
-
-function DisplayWidget:onTapClose()
-    UIManager:unschedule(self.autoRefresh)
-    self:restoreRotation()
-    UIManager:close(self)
-end
-
-DisplayWidget.onAnyKeyPressed = DisplayWidget.onTapClose
-
-function DisplayWidget:onCloseWidget()
-    -- Safety net: ensure rotation is always restored even if closed externally
-    self:restoreRotation()
-end
-
-function DisplayWidget:getWifiStatusText()
-    if NetworkMgr:isWifiOn() then
-        return _("")
-    else
-        return _("")
-    end
-end
-
-function DisplayWidget:getMemoryStatusText()
-    -- Based on the implemenation in readerfooter.lua
-    local statm = io.open("/proc/self/statm", "r")
-    if statm then
-        local dummy, rss = statm:read("*number", "*number")
-        statm:close()
-        -- we got the nb of 4Kb-pages used, that we convert to MiB
-        rss = math.floor(rss * (4096 / 1024 / 1024))
-        return T(_(" %1 MiB"), rss)
-    end
-end
-
-function DisplayWidget:getBatteryStatusText()
-    if Device:hasBattery() then
-        local powerd = Device:getPowerDevice()
-        local battery_level = powerd:getCapacity()
-        local prefix = powerd:getBatterySymbol(
-            powerd:isCharged(),
-            powerd:isCharging(),
-            battery_level
-        )
-        return T(_("%1 %2 %"), prefix, battery_level)
-    end
-end
-
-function DisplayWidget:getStatusText()
-    local wifi_string = self:getWifiStatusText()
-    local memory_string = self:getMemoryStatusText()
-    local battery_string = self:getBatteryStatusText()
-
-    local status_strings = { wifi_string, memory_string, battery_string }
-    return table.concat(status_strings, " | ")
-end
-
-function DisplayWidget:getDateText(now, use_locale)
-    return Datetime.secondsToDate(now, use_locale)
-end
-
-function DisplayWidget:getTimeText(now)
-    return Datetime.secondsToHour(now, true, false)
-end
-
-function DisplayWidget:update()
-    local time_text = self:getTimeText(self.now)
-    local date_text = self:getDateText(self.now, true)
-    local status_text = self:getStatusText()
-
-    -- Avoid spamming repeated calls to setText
-    if self.time_widget.text ~= time_text then
-        self.time_widget:setText(time_text)
-    end
-    if self.date_widget.text ~= date_text then
-        self.date_widget:setText(date_text)
-    end
-    if self.status_widget.text ~= status_text then
-        self.status_widget:setText(status_text)
-    end
-end
-
-function DisplayWidget:renderTimeWidget(now, width, font_face)
-    return TextBoxWidget:new {
-        text = self:getTimeText(now),
-        face = font_face or Font:getFace("tfont", 119),
-        width = width or Screen:getWidth(),
-        alignment = "center",
-        bold = true,
+function DtDisplay:addToMainMenu(menu_items)
+    menu_items.dtdisplay = {
+        text = _("Time & Day"),
+        sorting_hint = "more_tools",
+        sub_item_table = {
+            {
+                text = _("Launch"),
+                separator = true,
+                callback = function()
+                    UIManager:show(DisplayWidget:new { props = self.settings })
+                end,
+            },
+            {
+                text = _("Date widget font"),
+                sub_item_table = self:getFontMenuList(
+                    {
+                        font_callback = function(font_name)
+                            self:setDateFont(font_name)
+                        end,
+                        font_size_callback = function(font_size)
+                            self:setDateFontSize(font_size)
+                        end,
+                        font_size_func = function()
+                            return self.settings.date_widget.font_size
+                        end,
+                        checked_func = function(font)
+                            return font == self.settings.date_widget.font_name
+                        end
+                    }
+                ),
+            },
+            {
+                text = _("Time widget font"),
+                sub_item_table = self:getFontMenuList(
+                    {
+                        font_callback = function(font_name)
+                            self:setTimeFont(font_name)
+                        end,
+                        font_size_callback = function(font_size)
+                            self:setTimeFontSize(font_size)
+                        end,
+                        font_size_func = function()
+                            return self.settings.time_widget.font_size
+                        end,
+                        checked_func = function(font)
+                            return font == self.settings.time_widget.font_name
+                        end
+                    }
+                ),
+            },
+            {
+                text = _("Status line font"),
+                sub_item_table = self:getFontMenuList(
+                    {
+                        font_callback = function(font_name)
+                            self:setStatuslineFont(font_name)
+                        end,
+                        font_size_callback = function(font_size)
+                            self:setStatuslineFontSize(font_size)
+                        end,
+                        font_size_func = function()
+                            return self.settings.status_widget.font_size
+                        end,
+                        checked_func = function(font)
+                            return font == self.settings.status_widget.font_name
+                        end
+                    }
+                ),
+            },
+            {
+                text = _("Clock orientation"),
+                separator = false,
+                sub_item_table = self:getRotationMenuList(),
+            },
+            {
+                text = _("PNG overlay"),
+                separator = false,
+                sub_item_table = self:getPngOverlayMenuList(),
+            },
+        },
     }
 end
 
-function DisplayWidget:renderDateWidget(now, width, font_face, use_locale)
-    return TextBoxWidget:new {
-        text = self:getDateText(now, use_locale),
-        face = font_face or Font:getFace("infofont", 32),
-        width = width or Screen:getWidth(),
-        alignment = "center",
+function DtDisplay:getRotationMenuList()
+    local rotation_labels = {
+        [0] = _("0° (Portrait)"),
+        [1] = _("90° (Landscape clockwise)"),
+        [2] = _("180° (Portrait inverted)"),
+        [3] = _("270° (Landscape counter-clockwise)"),
     }
-end
 
-function DisplayWidget:renderStatusWidget(width, font_face)
-    return TextBoxWidget:new {
-        text = self:getStatusText(),
-        face = font_face or Font:getFace("infofont"),
-        width = width or Screen:getWidth(),
-        alignment = "center",
+    local menu_list = {
+        {
+            text = _("Follow KOReader orientation"),
+            checked_func = function()
+                return self.settings.rotation.follow_koreader
+            end,
+            callback = function()
+                self:setRotationFollowKOReader(true)
+            end,
+            separator = true,
+        },
     }
+
+    for rotation = 0, 3 do
+        table.insert(menu_list, {
+            text = rotation_labels[rotation],
+            checked_func = function()
+                return not self.settings.rotation.follow_koreader
+                    and self.settings.rotation.custom_rotation == rotation
+            end,
+            callback = function()
+                self:setCustomRotation(rotation)
+            end,
+        })
+    end
+
+    return menu_list
 end
 
---- Read PNG dimensions from file header without loading the full image.
--- PNG IHDR chunk: bytes 17-24 contain width (4 bytes BE) and height (4 bytes BE).
-function DisplayWidget:getPngDimensions(filepath)
-    local f = io.open(filepath, "rb")
-    if not f then
-        return nil, nil
-    end
-    local header = f:read(24)
-    f:close()
-    if not header or #header < 24 then
-        return nil, nil
-    end
-    -- Verify PNG signature (first 8 bytes)
-    local png_sig = "\137PNG\r\n\026\n"
-    if header:sub(1, 8) ~= png_sig then
-        return nil, nil
-    end
-    -- Width at bytes 17-20, Height at bytes 21-24 (big-endian)
-    local function read_be_uint32(s, offset)
-        local b1, b2, b3, b4 = s:byte(offset, offset + 3)
-        return b1 * 16777216 + b2 * 65536 + b3 * 256 + b4
-    end
-    local w = read_be_uint32(header, 17)
-    local h = read_be_uint32(header, 21)
-    return w, h
+function DtDisplay:setRotationFollowKOReader(follow)
+    self.settings.rotation.follow_koreader = follow
+    self.local_storage:reset(self.settings)
+    self.local_storage:flush()
 end
 
---- Get the native portrait resolution of the device.
--- Returns width, height where width < height (portrait).
-function DisplayWidget:getNativePortraitResolution()
+function DtDisplay:setCustomRotation(rotation)
+    self.settings.rotation.follow_koreader = false
+    self.settings.rotation.custom_rotation = rotation
+    self.local_storage:reset(self.settings)
+    self.local_storage:flush()
+end
+
+--- Get the recommended resolution string based on current screen size
+function DtDisplay:getRecommendedResolutionText()
     local screen_size = Screen:getSize()
     local sw, sh = screen_size.w, screen_size.h
-    -- Ensure portrait: width < height
+    -- Always show portrait resolution as primary recommendation
+    local pw, ph
     if sw > sh then
-        return sh, sw
+        pw, ph = sh, sw
+    else
+        pw, ph = sw, sh
     end
-    return sw, sh
+    return T(_("Recommended: %1x%2 or %3x%4 (rotated)"), pw, ph, ph, pw)
 end
 
---- Check if current screen orientation is portrait (0° or 180°)
-function DisplayWidget:isPortraitOrientation()
-    local screen_size = Screen:getSize()
-    return screen_size.w <= screen_size.h
+--- Build the PNG overlay submenu
+function DtDisplay:getPngOverlayMenuList()
+    local menu_list = {}
+
+    -- Info: recommended resolution
+    table.insert(menu_list, {
+        text_func = function()
+            return self:getRecommendedResolutionText()
+        end,
+        keep_menu_open = true,
+        callback = function() end, -- informational only
+        separator = true,
+    })
+
+    -- Toggle: enable/disable overlay
+    table.insert(menu_list, {
+        text = _("Enable PNG overlay"),
+        checked_func = function()
+            return self.settings.png_overlay.enabled
+        end,
+        callback = function()
+            self.settings.png_overlay.enabled = not self.settings.png_overlay.enabled
+            self:savePngOverlaySettings()
+        end,
+        separator = true,
+    })
+
+    -- Select PNG folder
+    table.insert(menu_list, {
+        text_func = function()
+            local folder = self.settings.png_overlay.folder_path
+            if folder and folder ~= "" then
+                local short = folder:match("([^/]+)$") or folder
+                return T(_("PNG folder: %1"), short)
+            else
+                return _("Select PNG folder")
+            end
+        end,
+        keep_menu_open = true,
+        callback = function(touchmenu_instance)
+            self:showPngFolderChooser(touchmenu_instance)
+        end,
+    })
+
+    -- Select single PNG file
+    table.insert(menu_list, {
+        text_func = function()
+            local fpath = self.settings.png_overlay.single_file_path
+            if fpath and fpath ~= "" then
+                local fname = fpath:match("([^/]+)$") or fpath
+                return T(_("Selected file: %1"), fname)
+            else
+                return _("Select a PNG file")
+            end
+        end,
+        keep_menu_open = true,
+        enabled_func = function()
+            local folder = self.settings.png_overlay.folder_path
+            return folder and folder ~= ""
+        end,
+        callback = function(touchmenu_instance)
+            self:showPngFileSelector(touchmenu_instance)
+        end,
+        separator = true,
+    })
+
+    -- Image selection mode: single
+    table.insert(menu_list, {
+        text = _("Use single image"),
+        checked_func = function()
+            return self.settings.png_overlay.mode == "single"
+        end,
+        callback = function()
+            self.settings.png_overlay.mode = "single"
+            self:savePngOverlaySettings()
+        end,
+    })
+
+    -- Image selection mode: cycle
+    table.insert(menu_list, {
+        text = _("Cycle through all images in folder"),
+        checked_func = function()
+            return self.settings.png_overlay.mode == "cycle"
+        end,
+        callback = function()
+            self.settings.png_overlay.mode = "cycle"
+            self:savePngOverlaySettings()
+        end,
+        separator = true,
+    })
+
+    -- Cycle interval setting
+    table.insert(menu_list, {
+        text_func = function()
+            local mins = self.settings.png_overlay.cycle_minutes or 1
+            if mins == 1 then
+                return T(_("Cycle interval: %1 minute"), mins)
+            else
+                return T(_("Cycle interval: %1 minutes"), mins)
+            end
+        end,
+        keep_menu_open = true,
+        enabled_func = function()
+            return self.settings.png_overlay.mode == "cycle"
+        end,
+        callback = function(touchmenu_instance)
+            self:showCycleIntervalSpinWidget(touchmenu_instance)
+        end,
+    })
+
+    return menu_list
 end
 
---- Check if a PNG file has valid dimensions (matches native or inverted native resolution).
--- Returns:
---   "normal" if image matches portrait resolution (w x h where w < h)
---   "inverted" if image matches landscape resolution (h x w)
---   nil if image dimensions don't match either
-function DisplayWidget:checkPngResolution(filepath)
-    local img_w, img_h = self:getPngDimensions(filepath)
-    if not img_w or not img_h then
-        return nil
-    end
-    local native_w, native_h = self:getNativePortraitResolution()
-    if img_w == native_w and img_h == native_h then
-        return "normal"
-    elseif img_w == native_h and img_h == native_w then
-        return "inverted"
-    end
-    return nil
+--- Save PNG overlay settings to persistent storage
+function DtDisplay:savePngOverlaySettings()
+    self.local_storage:reset(self.settings)
+    self.local_storage:flush()
 end
 
---- Get sorted list of valid PNG files from the configured folder.
--- Each entry is a table: { filename = "...", resolution_type = "normal"|"inverted" }
-function DisplayWidget:getPngFileList()
-    if self.png_file_list then
-        return self.png_file_list
+--- Show folder chooser dialog for PNG folder selection
+function DtDisplay:showPngFolderChooser(touchmenu_instance)
+    local PathChooser = require("ui/widget/pathchooser")
+    local start_path = self.settings.png_overlay.folder_path
+    if not start_path or start_path == "" then
+        start_path = DataStorage:getDataDir()
     end
 
-    local overlay_settings = self.props and self.props.png_overlay
-    if not overlay_settings or not overlay_settings.enabled then
-        return nil
-    end
+    local path_chooser = PathChooser:new {
+        select_directory = true,
+        select_file = false,
+        path = start_path,
+        onConfirm = function(chosen_path)
+            self.settings.png_overlay.folder_path = chosen_path
+            -- Reset single file selection when folder changes
+            self.settings.png_overlay.single_file_path = ""
+            self:savePngOverlaySettings()
+            if touchmenu_instance then
+                touchmenu_instance:updateItems()
+            end
+        end,
+    }
+    UIManager:show(path_chooser)
+end
 
-    local folder = overlay_settings.folder_path
+--- Show file selector dialog to pick a single PNG from the selected folder.
+-- Only shows files with valid resolution.
+function DtDisplay:showPngFileSelector(touchmenu_instance)
+    local folder = self.settings.png_overlay.folder_path
     if not folder or folder == "" then
-        return nil
+        local InfoMessage = require("ui/widget/infomessage")
+        UIManager:show(InfoMessage:new {
+            text = _("Please select a PNG folder first."),
+        })
+        return
     end
 
+    -- Scan folder for PNG files
     local lfs = require("libs/libkoreader-lfs")
     local files = {}
     local ok, iter, dir_obj = pcall(lfs.dir, folder)
     if not ok then
-        return nil
+        local InfoMessage = require("ui/widget/infomessage")
+        UIManager:show(InfoMessage:new {
+            text = _("Cannot open the selected folder."),
+        })
+        return
     end
 
     for entry in iter, dir_obj do
@@ -306,253 +412,249 @@ function DisplayWidget:getPngFileList()
 
     table.sort(files)
 
-    -- Filter by resolution
+    -- Filter by valid resolution using a temporary DisplayWidget helper
     local valid_files = {}
+    local screen_size = Screen:getSize()
+    local sw, sh = screen_size.w, screen_size.h
+    local native_w, native_h
+    if sw > sh then
+        native_w, native_h = sh, sw
+    else
+        native_w, native_h = sw, sh
+    end
+
     for _, fname in ipairs(files) do
         local fpath = folder .. "/" .. fname
-        local res_type = self:checkPngResolution(fpath)
-        if res_type then
-            table.insert(valid_files, { filename = fname, resolution_type = res_type })
+        local img_w, img_h = self:readPngDimensions(fpath)
+        if img_w and img_h then
+            if (img_w == native_w and img_h == native_h) or (img_w == native_h and img_h == native_w) then
+                table.insert(valid_files, fname)
+            end
         end
     end
 
     if #valid_files == 0 then
-        return nil
+        local InfoMessage = require("ui/widget/infomessage")
+        UIManager:show(InfoMessage:new {
+            text = T(_("No PNG files with valid resolution found.\nExpected: %1x%2 or %3x%4"), native_w, native_h, native_h, native_w),
+        })
+        return
     end
 
-    self.png_file_list = valid_files
-    return self.png_file_list
+    -- Build a button dialog with the list of valid PNG files
+    local ButtonDialogTitle = require("ui/widget/buttondialogtitle")
+    local buttons = {}
+    for _, fname in ipairs(valid_files) do
+        table.insert(buttons, {
+            {
+                text = fname,
+                callback = function()
+                    self.settings.png_overlay.single_file_path = folder .. "/" .. fname
+                    self:savePngOverlaySettings()
+                    UIManager:close(self._png_file_dialog)
+                    self._png_file_dialog = nil
+                    if touchmenu_instance then
+                        touchmenu_instance:updateItems()
+                    end
+                end,
+            },
+        })
+    end
+
+    self._png_file_dialog = ButtonDialogTitle:new {
+        title = _("Select a PNG file"),
+        buttons = buttons,
+    }
+    UIManager:show(self._png_file_dialog)
 end
 
---- Determine the rotation angle needed for a given image resolution type.
--- In portrait mode: inverted images need 90° rotation to fill screen.
--- In landscape mode: never rotate.
-function DisplayWidget:getImageRotationAngle(resolution_type)
-    if not self:isPortraitOrientation() then
-        -- Landscape: never rotate
-        return 0
-    end
-    -- Portrait
-    if resolution_type == "inverted" then
-        return 90
-    end
-    return 0
-end
-
---- Get the current PNG file path and its resolution type.
--- Returns: filepath, resolution_type  or  nil, nil
-function DisplayWidget:getCurrentPngPathAndType()
-    local overlay_settings = self.props and self.props.png_overlay
-    if not overlay_settings or not overlay_settings.enabled then
+--- Read PNG dimensions from file header (lightweight, no full image decode).
+function DtDisplay:readPngDimensions(filepath)
+    local f = io.open(filepath, "rb")
+    if not f then
         return nil, nil
     end
+    local header = f:read(24)
+    f:close()
+    if not header or #header < 24 then
+        return nil, nil
+    end
+    local png_sig = "\137PNG\r\n\026\n"
+    if header:sub(1, 8) ~= png_sig then
+        return nil, nil
+    end
+    local function read_be_uint32(s, offset)
+        local b1, b2, b3, b4 = s:byte(offset, offset + 3)
+        return b1 * 16777216 + b2 * 65536 + b3 * 256 + b4
+    end
+    local w = read_be_uint32(header, 17)
+    local h = read_be_uint32(header, 21)
+    return w, h
+end
 
-    local mode = overlay_settings.mode or "single"
-
-    if mode == "single" then
-        local single_path = overlay_settings.single_file_path
-        if single_path and single_path ~= "" then
-            local res_type = self:checkPngResolution(single_path)
-            if res_type then
-                return single_path, res_type
+--- Show spin widget for cycle interval setting
+function DtDisplay:showCycleIntervalSpinWidget(touchmenu_instance)
+    local SpinWidget = require("ui/widget/spinwidget")
+    local current_value = self.settings.png_overlay.cycle_minutes or 1
+    UIManager:show(
+        SpinWidget:new {
+            value = current_value,
+            value_min = 1,
+            value_max = 120,
+            value_step = 1,
+            value_hold_step = 5,
+            ok_text = _("Set interval"),
+            title_text = _("Image cycle interval (minutes)"),
+            callback = function(spin)
+                self.settings.png_overlay.cycle_minutes = spin.value
+                self:savePngOverlaySettings()
+                if touchmenu_instance then
+                    touchmenu_instance:updateItems()
+                end
             end
-        end
-        return nil, nil
-    elseif mode == "cycle" then
-        local files = self:getPngFileList()
-        if not files or #files == 0 then
-            return nil, nil
-        end
-        local folder = overlay_settings.folder_path
-        if self.png_cycle_index > #files then
-            self.png_cycle_index = 1
-        end
-        local entry = files[self.png_cycle_index]
-        return folder .. "/" .. entry.filename, entry.resolution_type
-    end
-
-    return nil, nil
-end
-
---- Get the configured cycle interval in minutes
-function DisplayWidget:getCycleMinutes()
-    local overlay_settings = self.props and self.props.png_overlay
-    if overlay_settings and overlay_settings.cycle_minutes then
-        return overlay_settings.cycle_minutes
-    end
-    return 1
-end
-
---- Cycle to the next PNG image based on configured interval.
--- Called on each refresh (~every minute).
-function DisplayWidget:cyclePngOverlay()
-    local overlay_settings = self.props and self.props.png_overlay
-    if not overlay_settings or not overlay_settings.enabled then
-        return
-    end
-    if overlay_settings.mode ~= "cycle" then
-        return
-    end
-
-    local files = self:getPngFileList()
-    if not files or #files == 0 then
-        return
-    end
-
-    self.png_cycle_counter = self.png_cycle_counter + 1
-    local cycle_minutes = self:getCycleMinutes()
-
-    if self.png_cycle_counter >= cycle_minutes then
-        self.png_cycle_counter = 0
-        self.png_cycle_index = self.png_cycle_index + 1
-        if self.png_cycle_index > #files then
-            self.png_cycle_index = 1
-        end
-
-        -- Update the overlay widget with the new image
-        self:updatePngOverlayWidget()
-        UIManager:setDirty("all", "ui")
-    end
-end
-
---- Create the PNG overlay ImageWidget with proper rotation handling.
-function DisplayWidget:createPngOverlayWidget()
-    local png_path, res_type = self:getCurrentPngPathAndType()
-    if not png_path then
-        return nil
-    end
-
-    local ImageWidget = require("ui/widget/imagewidget")
-    local screen_size = Screen:getSize()
-    local rotation_angle = self:getImageRotationAngle(res_type)
-
-    local widget = ImageWidget:new {
-        file = png_path,
-        width = screen_size.w,
-        height = screen_size.h,
-        scale_factor = 0,
-        alpha = true,
-        rotation_angle = rotation_angle,
-    }
-
-    return widget
-end
-
---- Update the overlay widget in-place for cycling.
-function DisplayWidget:updatePngOverlayWidget()
-    local png_path, res_type = self:getCurrentPngPathAndType()
-    if not png_path then
-        return
-    end
-
-    if self.png_overlay_widget and self.overlap_group then
-        local ImageWidget = require("ui/widget/imagewidget")
-        local screen_size = Screen:getSize()
-        local rotation_angle = self:getImageRotationAngle(res_type)
-
-        -- Free old image resources
-        if self.png_overlay_widget.free then
-            self.png_overlay_widget:free()
-        end
-
-        local new_widget = ImageWidget:new {
-            file = png_path,
-            width = screen_size.w,
-            height = screen_size.h,
-            scale_factor = 0,
-            alpha = true,
-            rotation_angle = rotation_angle,
         }
-
-        -- Replace overlay in the overlap group (second element)
-        self.png_overlay_widget = new_widget
-        if self.overlap_group and #self.overlap_group >= 2 then
-            self.overlap_group[2] = new_widget
-        end
-    end
+    )
 end
 
-function DisplayWidget:render()
-    local screen_size = Screen:getSize()
+function DtDisplay:getFontMenuList(args)
+    -- Unpack arguments
+    local font_callback = args.font_callback
+    local font_size_callback = args.font_size_callback
+    local font_size_func = args.font_size_func
+    local checked_func = args.checked_func
 
-    -- Insntiate widgets
-    self.time_widget = self:renderTimeWidget(
-        self.now,
-        screen_size.w,
-        Font:getFace(
-            self.props.time_widget.font_name,
-            self.props.time_widget.font_size
-        )
-    )
-    self.date_widget = self:renderDateWidget(
-        self.now,
-        screen_size.w,
-        Font:getFace(
-            self.props.date_widget.font_name,
-            self.props.date_widget.font_size
-        ),
-        true
-    )
-    self.status_widget = self:renderStatusWidget(
-        screen_size.w,
-        Font:getFace(
-            self.props.status_widget.font_name,
-            self.props.status_widget.font_size
-        )
-    )
+    -- Based on readerfont.lua
+    cre = require("document/credocument"):engineInit()
+    local face_list = cre.getFontFaces()
+    local menu_list = {}
 
-    -- Compute the widget heights and the amount of spacing we need
-    local total_height = self.time_widget:getSize().h + self.date_widget:getSize().h + self.status_widget:getSize().h
-    local spacer_height = (screen_size.h - total_height) / 2
+    -- Font size
+    table.insert(menu_list, {
+        text_func = function()
+            return T(_("Font size: %1"), font_size_func())
+        end,
+        callback = function(touchmenu_instance)
+            self:showFontSizeSpinWidget(touchmenu_instance, font_size_func(), font_size_callback)
+        end,
+        keep_menu_open = true,
+        separator = true
+    })
 
-    -- HELP: is there a better way of drawing blank space?
-    local spacer_widget = TextBoxWidget:new {
-        text = nil,
-        face = Font:getFace("cfont"),
-        width = screen_size.w,
-        height = spacer_height
-    }
+    -- Font list
+    for k, v in ipairs(face_list) do
+        local font_filename, font_faceindex, is_monospace = cre.getFontFaceFilenameAndFaceIndex(v)
+        table.insert(menu_list, {
+            text_func = function()
+                -- defaults are hardcoded in credocument.lua
+                local default_font = G_reader_settings:readSetting("cre_font")
+                local fallback_font = G_reader_settings:readSetting("fallback_font")
+                local monospace_font = G_reader_settings:readSetting("monospace_font")
+                local text = v
+                if font_filename and font_faceindex then
+                    text = FontList:getLocalizedFontName(font_filename, font_faceindex) or text
+                end
 
-    -- Lay out and assemble
-    self.datetime_vertical_group = VerticalGroup:new {
-        self.date_widget,
-        self.time_widget,
-        self.status_widget,
-    }
-    local vertical_group = VerticalGroup:new {
-        spacer_widget,
-        self.datetime_vertical_group,
-        spacer_widget,
-    }
+                if v == monospace_font then
+                    text = text .. " \u{1F13C}" -- Squared Latin Capital Letter M
+                elseif is_monospace then
+                    text = text .. " \u{1D39}"  -- Modified Letter Capital M
+                end
+                if v == default_font then
+                    text = text .. "   ★"
+                end
+                if v == fallback_font then
+                    text = text .. "   "
+                end
+                return text
+            end,
+            font_func = function(size)
+                if G_reader_settings:nilOrTrue("font_menu_use_font_face") then
+                    if font_filename and font_faceindex then
+                        return Font:getFace(font_filename, size, font_faceindex)
+                    end
+                end
+            end,
+            callback = function()
+                return font_callback(font_filename)
+            end,
+            hold_callback = function(touchmenu_instance)
+            end,
+            checked_func = function()
+                return checked_func(font_filename)
+            end,
+            menu_item_id = v,
+        })
+    end
 
-    local clock_frame = FrameContainer:new {
-        geom = Geom:new { w = screen_size.w, screen_size.h },
-        radius = 0,
-        bordersize = 0,
-        padding = 0,
-        margin = 0,
-        background = Blitbuffer.COLOUR_WHITE,
-        color = Blitbuffer.COLOUR_WHITE,
-        width = screen_size.w,
-        height = screen_size.h,
-        vertical_group
-    }
+    return menu_list
+end
 
-    -- Build PNG overlay if enabled
-    self.png_overlay_widget = self:createPngOverlayWidget()
+function DtDisplay:setDateFont(font)
+    self.settings["date_widget"]["font_name"] = font
+    self.local_storage:reset(self.settings)
+    self.local_storage:flush()
+end
 
-    if self.png_overlay_widget then
-        -- Use OverlapGroup to layer the PNG on top of the clock
-        self.overlap_group = OverlapGroup:new {
-            dimen = Geom:new { w = screen_size.w, h = screen_size.h },
-            clock_frame,
-            self.png_overlay_widget,
+function DtDisplay:setTimeFont(font)
+    self.settings["time_widget"]["font_name"] = font
+    self.local_storage:reset(self.settings)
+    self.local_storage:flush()
+end
+
+function DtDisplay:setStatuslineFont(font)
+    self.settings["status_widget"]["font_name"] = font
+    self.local_storage:reset(self.settings)
+    self.local_storage:flush()
+end
+
+function DtDisplay:setDateFontSize(font_size)
+    self.settings["date_widget"]["font_size"] = font_size
+    self.local_storage:reset(self.settings)
+    self.local_storage:flush()
+end
+
+function DtDisplay:setTimeFontSize(font_size)
+    self.settings["time_widget"]["font_size"] = font_size
+    self.local_storage:reset(self.settings)
+    self.local_storage:flush()
+end
+
+function DtDisplay:setStatuslineFontSize(font_size)
+    self.settings["status_widget"]["font_size"] = font_size
+    self.local_storage:reset(self.settings)
+    self.local_storage:flush()
+end
+
+function DtDisplay:showDateTimeWidget()
+    UIManager:show(DisplayWidget:new {})
+end
+
+function DtDisplay:onDTDisplayLaunch()
+    UIManager:show(DisplayWidget:new { props = self.settings })
+end
+
+function DtDisplay:showFontSizeSpinWidget(touchmenu_instance, font_size, callback)
+    -- Lazy loading the widget import
+    local SpinWidget = require("ui/widget/spinwidget")
+    UIManager:show(
+        SpinWidget:new {
+            value = font_size,
+            value_min = 8,
+            value_max = 256,
+            value_step = 1,
+            value_hold_step = 10,
+            ok_text = _("Set font size"),
+            title_text = _("Set font size"),
+            callback = function(spin)
+                callback(spin.value)
+                touchmenu_instance:updateItems()
+            end
         }
-        return self.overlap_group
-    else
-        self.overlap_group = nil
-        return clock_frame
-    end
+    )
 end
 
-return DisplayWidget
+function DtDisplay:onDispatcherRegisterActions()
+    Dispatcher:registerAction("dtdisplay_launch", { category="none", event="DTDisplayLaunch", title=_("Launch Time & Day"), general=true})
+end
+
+return DtDisplay
