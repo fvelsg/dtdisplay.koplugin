@@ -41,7 +41,20 @@ function DtDisplay:initLuaSettings()
                 font_name = "./fonts/noto/NotoSans-Regular.ttf",
                 font_size = 24,
             },
+            rotation = {
+                follow_koreader = true,
+                custom_rotation = 0,
+            },
         })
+        self.local_storage:flush()
+    end
+
+    -- Migration: ensure rotation settings exist for users upgrading from older config
+    if self.local_storage.data.rotation == nil then
+        self.local_storage.data.rotation = {
+            follow_koreader = true,
+            custom_rotation = 0,
+        }
         self.local_storage:flush()
     end
 end
@@ -114,9 +127,64 @@ function DtDisplay:addToMainMenu(menu_items)
                         end
                     }
                 ),
-            }
+            },
+            {
+                text = _("Clock orientation"),
+                separator = false,
+                sub_item_table = self:getRotationMenuList(),
+            },
         },
     }
+end
+
+function DtDisplay:getRotationMenuList()
+    local rotation_labels = {
+        [0] = _("0° (Portrait)"),
+        [1] = _("90° (Landscape clockwise)"),
+        [2] = _("180° (Portrait inverted)"),
+        [3] = _("270° (Landscape counter-clockwise)"),
+    }
+
+    local menu_list = {
+        {
+            text = _("Follow KOReader orientation"),
+            checked_func = function()
+                return self.settings.rotation.follow_koreader
+            end,
+            callback = function()
+                self:setRotationFollowKOReader(true)
+            end,
+            separator = true,
+        },
+    }
+
+    for rotation = 0, 3 do
+        table.insert(menu_list, {
+            text = rotation_labels[rotation],
+            checked_func = function()
+                return not self.settings.rotation.follow_koreader
+                    and self.settings.rotation.custom_rotation == rotation
+            end,
+            callback = function()
+                self:setCustomRotation(rotation)
+            end,
+        })
+    end
+
+    return menu_list
+end
+
+function DtDisplay:setRotationFollowKOReader(follow)
+    self.settings.rotation.follow_koreader = follow
+    self.local_storage:reset(self.settings)
+    self.local_storage:flush()
+end
+
+function DtDisplay:setCustomRotation(rotation)
+    self.settings.rotation.follow_koreader = false
+    self.settings.rotation.custom_rotation = rotation
+    self.local_storage:reset(self.settings)
+    self.local_storage:flush()
 end
 
 function DtDisplay:getFontMenuList(args)
@@ -166,7 +234,7 @@ function DtDisplay:getFontMenuList(args)
                     text = text .. "   ★"
                 end
                 if v == fallback_font then
-                    text = text .. "   �"
+                    text = text .. "   "
                 end
                 return text
             end,
