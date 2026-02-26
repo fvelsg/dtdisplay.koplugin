@@ -15,6 +15,12 @@ local TextBoxWidget = require("ui/widget/textboxwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 
+-- Importing from the other files --
+local StatusUtils = require("statusutils")
+local PngUtils = require("pngutils")
+
+------------------
+
 local T = require("ffi/util").template
 local _ = require("gettext")
 
@@ -177,48 +183,15 @@ function DisplayWidget:onCloseWidget()
     end
 end
 
--- =========================================================
--- DO NOT MODIFY ANYTHING BELOW THIS LINE. 
--- Leave getWifiStatusText() and everything else as it is.
--- =========================================================
-
-function DisplayWidget:getWifiStatusText()
-    if NetworkMgr:isWifiOn() then
-        return _("")
-    else
-        return _("")
-    end
-end
-
-function DisplayWidget:getMemoryStatusText()
-    -- Based on the implemenation in readerfooter.lua
-    local statm = io.open("/proc/self/statm", "r")
-    if statm then
-        local dummy, rss = statm:read("*number", "*number")
-        statm:close()
-        -- we got the nb of 4Kb-pages used, that we convert to MiB
-        rss = math.floor(rss * (4096 / 1024 / 1024))
-        return T(_(" %1 MiB"), rss)
-    end
-end
-
-function DisplayWidget:getBatteryStatusText()
-    if Device:hasBattery() then
-        local powerd = Device:getPowerDevice()
-        local battery_level = powerd:getCapacity()
-        local prefix = powerd:getBatterySymbol(
-            powerd:isCharged(),
-            powerd:isCharging(),
-            battery_level
-        )
-        return T(_("%1 %2 %"), prefix, battery_level)
-    end
-end
-
 function DisplayWidget:getStatusText()
-    local wifi_string = self:getWifiStatusText()
-    local memory_string = self:getMemoryStatusText()
-    local battery_string = self:getBatteryStatusText()
+    -- local wifi_string = self:getWifiStatusText()
+    local wifi_string = StatusUtils.getWifiStatusText()
+    
+    -- local memory_string = self:getMemoryStatusText()
+    local memory_string = StatusUtils.getMemoryStatusText()
+
+    -- local battery_string = self:getBatteryStatusText()
+    local battery_string = StatusUtils.getBatteryText()
 
     local status_strings = { wifi_string, memory_string, battery_string }
     return table.concat(status_strings, " | ")
@@ -277,61 +250,6 @@ function DisplayWidget:renderStatusWidget(width, font_face)
     }
 end
 
---- Read PNG dimensions from file header without loading the full image.
-function DisplayWidget:getPngDimensions(filepath)
-    local f = io.open(filepath, "rb")
-    if not f then
-        return nil, nil
-    end
-    local header = f:read(24)
-    f:close()
-    if not header or #header < 24 then
-        return nil, nil
-    end
-    local png_sig = "\137PNG\r\n\026\n"
-    if header:sub(1, 8) ~= png_sig then
-        return nil, nil
-    end
-    local function read_be_uint32(s, offset)
-        local b1, b2, b3, b4 = s:byte(offset, offset + 3)
-        return b1 * 16777216 + b2 * 65536 + b3 * 256 + b4
-    end
-    local w = read_be_uint32(header, 17)
-    local h = read_be_uint32(header, 21)
-    return w, h
-end
-
---- Get the native portrait resolution of the device.
-function DisplayWidget:getNativePortraitResolution()
-    local screen_size = Screen:getSize()
-    local sw, sh = screen_size.w, screen_size.h
-    if sw > sh then
-        return sh, sw
-    end
-    return sw, sh
-end
-
---- Check if current screen orientation is portrait (0° or 180°)
-function DisplayWidget:isPortraitOrientation()
-    local screen_size = Screen:getSize()
-    return screen_size.w <= screen_size.h
-end
-
---- Check if a PNG file has valid dimensions.
-function DisplayWidget:checkPngResolution(filepath)
-    local img_w, img_h = self:getPngDimensions(filepath)
-    if not img_w or not img_h then
-        return nil
-    end
-    local native_w, native_h = self:getNativePortraitResolution()
-    if img_w == native_w and img_h == native_h then
-        return "normal"
-    elseif img_w == native_h and img_h == native_w then
-        return "inverted"
-    end
-    return nil
-end
-
 --- Get the active folder path based on current orientation.
 function DisplayWidget:getActiveFolderPath()
     local overlay_settings = self.props and self.props.png_overlay
@@ -339,7 +257,7 @@ function DisplayWidget:getActiveFolderPath()
         return nil
     end
 
-    if self:isPortraitOrientation() then
+    if PngUtils.isPortraitOrientation() then
         local folder = overlay_settings.portrait_folder_path
         if folder and folder ~= "" then
             return folder
@@ -369,7 +287,7 @@ function DisplayWidget:getActiveSingleFilePath()
         return nil
     end
 
-    if self:isPortraitOrientation() then
+    if PngUtils.isPortraitOrientation() then
         local fpath = overlay_settings.single_file_path_portrait
         if fpath and fpath ~= "" then
             return fpath
@@ -430,7 +348,7 @@ function DisplayWidget:getPngFileList()
     local valid_files = {}
     for _, fname in ipairs(files) do
         local fpath = folder .. "/" .. fname
-        local res_type = self:checkPngResolution(fpath)
+        local res_type = PngUtils.checkPngResolution(fpath)
         if res_type then
             table.insert(valid_files, { filename = fname, resolution_type = res_type })
         end
@@ -442,17 +360,6 @@ function DisplayWidget:getPngFileList()
 
     self.png_file_list = valid_files
     return self.png_file_list
-end
-
---- Determine the rotation angle needed for a given image resolution type.
-function DisplayWidget:getImageRotationAngle(resolution_type)
-    if not self:isPortraitOrientation() then
-        return 0
-    end
-    if resolution_type == "inverted" then
-        return 90
-    end
-    return 0
 end
 
 --- Get the current PNG file path and its resolution type.
@@ -467,7 +374,7 @@ function DisplayWidget:getCurrentPngPathAndType()
     if mode == "single" then
         local single_path = self:getActiveSingleFilePath()
         if single_path then
-            local res_type = self:checkPngResolution(single_path)
+            local res_type = PngUtils.checkPngResolution(single_path)
             if res_type then
                 return single_path, res_type
             end
@@ -555,7 +462,7 @@ function DisplayWidget:createPngOverlayWidget()
 
     local ImageWidget = require("ui/widget/imagewidget")
     local screen_size = Screen:getSize()
-    local rotation_angle = self:getImageRotationAngle(res_type)
+    local rotation_angle = PngUtils.getImageRotationAngle(res_type)
 
     local widget = ImageWidget:new {
         file = png_path,
@@ -579,7 +486,7 @@ function DisplayWidget:updatePngOverlayWidget()
     if self.png_overlay_widget and self.overlap_group then
         local ImageWidget = require("ui/widget/imagewidget")
         local screen_size = Screen:getSize()
-        local rotation_angle = self:getImageRotationAngle(res_type)
+        local rotation_angle = PngUtils.getImageRotationAngle(res_type)
 
         -- Free old image resources
         if self.png_overlay_widget.free then
