@@ -18,6 +18,9 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 -- Importing from the other files --
 local StatusUtils = require("statusutils")
 local PngUtils = require("pngutils")
+local TimeUtils = require("timeutils")
+local RenderUtils = require("renderutils")
+local SystemUtils = require("systemutils")
 
 ------------------
 
@@ -80,34 +83,9 @@ function DisplayWidget:init()
 
     if self.props and self.props.suspend then
         if self.props.suspend.never_suspend then
-            self:setAutoSuspend(-1)
+            SystemUtils.setAutoSuspend(-1)
         elseif self.props.suspend.custom_timeout_enabled and self.props.suspend.custom_timeout_minutes then
-            self:setAutoSuspend(self.props.suspend.custom_timeout_minutes * 60)
-        end
-    end
-end
-
--- New Helper Function to handle the timer and Kindle native powerd
-function DisplayWidget:setAutoSuspend(seconds)
-    local autosuspend = PluginShare.live_autosuspend
-    if autosuspend then
-        autosuspend.auto_suspend_timeout_seconds = seconds
-        G_reader_settings:saveSetting("auto_suspend_timeout_seconds", seconds)
-        
-        if type(autosuspend._unschedule) == "function" then
-            autosuspend:_unschedule()
-        end
-        if seconds > 0 and type(autosuspend._start) == "function" then
-            autosuspend:_start()
-        end
-        
-        if Device:isKindle() then
-            if type(autosuspend._unschedule_kindle) == "function" then
-                autosuspend:_unschedule_kindle()
-            end
-            if type(autosuspend._start_kindle) == "function" then
-                autosuspend:_start_kindle()
-            end
+            SystemUtils.setAutoSuspend(self.props.suspend.custom_timeout_minutes * 60)
         end
     end
 end
@@ -167,7 +145,7 @@ function DisplayWidget:onTapClose()
     
     -- RESTORE ORIGINAL AUTOSUSPEND
     if self.original_autosuspend_timeout then
-        self:setAutoSuspend(self.original_autosuspend_timeout)
+        SystemUtils.setAutoSuspend(self.original_autosuspend_timeout)
     end
     
     UIManager:close(self)
@@ -179,36 +157,15 @@ function DisplayWidget:onCloseWidget()
     -- Safety net: ensure rotation and suspend are always restored even if closed externally
     self:restoreRotation()
     if self.original_autosuspend_timeout then
-        self:setAutoSuspend(self.original_autosuspend_timeout)
+        SystemUtils.setAutoSuspend(self.original_autosuspend_timeout)
     end
 end
 
-function DisplayWidget:getStatusText()
-    -- local wifi_string = self:getWifiStatusText()
-    local wifi_string = StatusUtils.getWifiStatusText()
-    
-    -- local memory_string = self:getMemoryStatusText()
-    local memory_string = StatusUtils.getMemoryStatusText()
-
-    -- local battery_string = self:getBatteryStatusText()
-    local battery_string = StatusUtils.getBatteryText()
-
-    local status_strings = { wifi_string, memory_string, battery_string }
-    return table.concat(status_strings, " | ")
-end
-
-function DisplayWidget:getDateText(now, use_locale)
-    return Datetime.secondsToDate(now, use_locale)
-end
-
-function DisplayWidget:getTimeText(now)
-    return Datetime.secondsToHour(now, true, false)
-end
 
 function DisplayWidget:update()
-    local time_text = self:getTimeText(self.now)
-    local date_text = self:getDateText(self.now, true)
-    local status_text = self:getStatusText()
+    local time_text = TimeUtils.getTimeText(self.now)
+    local date_text = TimeUtils.getDateText(self.now, true)
+    local status_text = StatusUtils.getStatusText()
 
     -- Avoid spamming repeated calls to setText
     if self.time_widget.text ~= time_text then
@@ -220,34 +177,6 @@ function DisplayWidget:update()
     if self.status_widget.text ~= status_text then
         self.status_widget:setText(status_text)
     end
-end
-
-function DisplayWidget:renderTimeWidget(now, width, font_face)
-    return TextBoxWidget:new {
-        text = self:getTimeText(now),
-        face = font_face or Font:getFace("tfont", 119),
-        width = width or Screen:getWidth(),
-        alignment = "center",
-        bold = true,
-    }
-end
-
-function DisplayWidget:renderDateWidget(now, width, font_face, use_locale)
-    return TextBoxWidget:new {
-        text = self:getDateText(now, use_locale),
-        face = font_face or Font:getFace("infofont", 32),
-        width = width or Screen:getWidth(),
-        alignment = "center",
-    }
-end
-
-function DisplayWidget:renderStatusWidget(width, font_face)
-    return TextBoxWidget:new {
-        text = self:getStatusText(),
-        face = font_face or Font:getFace("infofont"),
-        width = width or Screen:getWidth(),
-        alignment = "center",
-    }
 end
 
 --- Get the active folder path based on current orientation.
@@ -513,7 +442,7 @@ function DisplayWidget:render()
     local screen_size = Screen:getSize()
 
     -- Insntiate widgets
-    self.time_widget = self:renderTimeWidget(
+    self.time_widget = RenderUtils.renderTimeWidget(
         self.now,
         screen_size.w,
         Font:getFace(
@@ -521,7 +450,7 @@ function DisplayWidget:render()
             self.props.time_widget.font_size
         )
     )
-    self.date_widget = self:renderDateWidget(
+    self.date_widget = RenderUtils.renderDateWidget(
         self.now,
         screen_size.w,
         Font:getFace(
@@ -530,7 +459,7 @@ function DisplayWidget:render()
         ),
         true
     )
-    self.status_widget = self:renderStatusWidget(
+    self.status_widget = RenderUtils.renderStatusWidget(
         screen_size.w,
         Font:getFace(
             self.props.status_widget.font_name,

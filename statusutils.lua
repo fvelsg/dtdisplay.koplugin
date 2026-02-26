@@ -41,4 +41,13 @@ function StatusUtils.getMemoryStatusText()
     end
 end
 
+function StatusUtils.getStatusText()
+    local wifi_string = StatusUtils.getWifiStatusText()
+    local memory_string = StatusUtils.getMemoryStatusText()
+    local battery_string = StatusUtils.getBatteryText()
+
+    local status_strings = { wifi_string, memory_string, battery_string }
+    return table.concat(status_strings, " | ")
+end
+
 return StatusUtils
