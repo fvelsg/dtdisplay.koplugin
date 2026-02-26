@@ -50,9 +50,19 @@ function DtDisplay:initLuaSettings()
             png_overlay = {
                 enabled = false,
                 folder_path = "",
+                portrait_folder_path = "",
+                landscape_folder_path = "",
                 mode = "single",
                 single_file_path = "",
+                single_file_path_portrait = "",
+                single_file_path_landscape = "",
                 cycle_minutes = 1,
+                full_refresh_on_cycle = false,
+            },
+            suspend = {
+                never_suspend = false,
+                custom_timeout_enabled = false,
+                custom_timeout_minutes = 60,
             },
         })
         self.local_storage:flush()
@@ -67,21 +77,62 @@ function DtDisplay:initLuaSettings()
         self.local_storage:flush()
     end
 
-    -- Migration: ensure png_overlay settings exist for users upgrading from older config
+    -- Migration: ensure png_overlay settings exist
     if self.local_storage.data.png_overlay == nil then
         self.local_storage.data.png_overlay = {
             enabled = false,
             folder_path = "",
+            portrait_folder_path = "",
+            landscape_folder_path = "",
             mode = "single",
             single_file_path = "",
+            single_file_path_portrait = "",
+            single_file_path_landscape = "",
             cycle_minutes = 1,
+            full_refresh_on_cycle = false,
         }
         self.local_storage:flush()
     end
 
-    -- Migration: ensure cycle_minutes exists for users upgrading from previous png_overlay version
+    -- Migration: ensure cycle_minutes exists
     if self.local_storage.data.png_overlay.cycle_minutes == nil then
         self.local_storage.data.png_overlay.cycle_minutes = 1
+        self.local_storage:flush()
+    end
+
+    -- Migration: ensure separate folder paths exist
+    if self.local_storage.data.png_overlay.portrait_folder_path == nil then
+        self.local_storage.data.png_overlay.portrait_folder_path = self.local_storage.data.png_overlay.folder_path or ""
+        self.local_storage:flush()
+    end
+    if self.local_storage.data.png_overlay.landscape_folder_path == nil then
+        self.local_storage.data.png_overlay.landscape_folder_path = self.local_storage.data.png_overlay.folder_path or ""
+        self.local_storage:flush()
+    end
+
+    -- Migration: ensure separate single file paths exist
+    if self.local_storage.data.png_overlay.single_file_path_portrait == nil then
+        self.local_storage.data.png_overlay.single_file_path_portrait = self.local_storage.data.png_overlay.single_file_path or ""
+        self.local_storage:flush()
+    end
+    if self.local_storage.data.png_overlay.single_file_path_landscape == nil then
+        self.local_storage.data.png_overlay.single_file_path_landscape = self.local_storage.data.png_overlay.single_file_path or ""
+        self.local_storage:flush()
+    end
+
+    -- Migration: ensure full_refresh_on_cycle exists
+    if self.local_storage.data.png_overlay.full_refresh_on_cycle == nil then
+        self.local_storage.data.png_overlay.full_refresh_on_cycle = false
+        self.local_storage:flush()
+    end
+
+    -- Migration: ensure suspend settings exist
+    if self.local_storage.data.suspend == nil then
+        self.local_storage.data.suspend = {
+            never_suspend = false,
+            custom_timeout_enabled = false,
+            custom_timeout_minutes = 60,
+        }
         self.local_storage:flush()
     end
 end
@@ -161,6 +212,11 @@ function DtDisplay:addToMainMenu(menu_items)
                 sub_item_table = self:getRotationMenuList(),
             },
             {
+                text = _("Suspend settings"),
+                separator = false,
+                sub_item_table = self:getSuspendMenuList(),
+            },
+            {
                 text = _("PNG overlay"),
                 separator = false,
                 sub_item_table = self:getPngOverlayMenuList(),
@@ -219,18 +275,120 @@ function DtDisplay:setCustomRotation(rotation)
     self.local_storage:flush()
 end
 
+--- Build the suspend settings submenu
+function DtDisplay:getSuspendMenuList()
+    local menu_list = {}
+
+    -- Never suspend
+    table.insert(menu_list, {
+        text = _("Never suspend while clock is running"),
+        checked_func = function()
+            return self.settings.suspend.never_suspend
+        end,
+        callback = function()
+            self.settings.suspend.never_suspend = not self.settings.suspend.never_suspend
+            if self.settings.suspend.never_suspend then
+                self.settings.suspend.custom_timeout_enabled = false
+            end
+            self:saveSuspendSettings()
+        end,
+        separator = true,
+    })
+
+    -- Custom timeout toggle
+    table.insert(menu_list, {
+        text = _("Use custom suspend timeout"),
+        checked_func = function()
+            return self.settings.suspend.custom_timeout_enabled
+        end,
+        enabled_func = function()
+            return not self.settings.suspend.never_suspend
+        end,
+        callback = function()
+            self.settings.suspend.custom_timeout_enabled = not self.settings.suspend.custom_timeout_enabled
+            self:saveSuspendSettings()
+        end,
+    })
+
+    -- Custom timeout value
+    table.insert(menu_list, {
+        text_func = function()
+            local mins = self.settings.suspend.custom_timeout_minutes or 60
+            if mins == 1 then
+                return T(_("Suspend timeout: %1 minute"), mins)
+            else
+                return T(_("Suspend timeout: %1 minutes"), mins)
+            end
+        end,
+        keep_menu_open = true,
+        enabled_func = function()
+            return self.settings.suspend.custom_timeout_enabled and not self.settings.suspend.never_suspend
+        end,
+        callback = function(touchmenu_instance)
+            self:showSuspendTimeoutSpinWidget(touchmenu_instance)
+        end,
+        separator = true,
+    })
+
+    -- Info: current behavior
+    table.insert(menu_list, {
+        text_func = function()
+            if self.settings.suspend.never_suspend then
+                return _("Status: Auto-suspend disabled while clock runs")
+            elseif self.settings.suspend.custom_timeout_enabled then
+                return T(_("Status: Custom timeout of %1 min"), self.settings.suspend.custom_timeout_minutes or 60)
+            else
+                return _("Status: Using KOReader default suspend")
+            end
+        end,
+        keep_menu_open = true,
+        callback = function() end,
+    })
+
+    return menu_list
+end
+
+--- Save suspend settings
+function DtDisplay:saveSuspendSettings()
+    self.local_storage:reset(self.settings)
+    self.local_storage:flush()
+end
+
+--- Show spin widget for suspend timeout
+function DtDisplay:showSuspendTimeoutSpinWidget(touchmenu_instance)
+    local SpinWidget = require("ui/widget/spinwidget")
+    local current_value = self.settings.suspend.custom_timeout_minutes or 60
+    UIManager:show(
+        SpinWidget:new {
+            value = current_value,
+            value_min = 1,
+            value_max = 480,
+            value_step = 1,
+            value_hold_step = 10,
+            ok_text = _("Set timeout"),
+            title_text = _("Suspend timeout (minutes)"),
+            callback = function(spin)
+                self.settings.suspend.custom_timeout_minutes = spin.value
+                self:saveSuspendSettings()
+                if touchmenu_instance then
+                    touchmenu_instance:updateItems()
+                end
+            end
+        }
+    )
+end
+
 --- Get the recommended resolution string based on current screen size
 function DtDisplay:getRecommendedResolutionText()
     local screen_size = Screen:getSize()
     local sw, sh = screen_size.w, screen_size.h
-    -- Always show portrait resolution as primary recommendation
     local pw, ph
     if sw > sh then
         pw, ph = sh, sw
     else
         pw, ph = sw, sh
     end
-    return T(_("Recommended: %1x%2 or %3x%4 (rotated)"), pw, ph, ph, pw)
+    return T(_("Recommended: %1x%2 (portrait) / %3x%4 (landscape)"), pw, ph, ph, pw)
 end
 
 --- Build the PNG overlay submenu
@@ -243,7 +401,7 @@ function DtDisplay:getPngOverlayMenuList()
             return self:getRecommendedResolutionText()
         end,
         keep_menu_open = true,
-        callback = function() end, -- informational only
+        callback = function() end,
         separator = true,
     })
 
@@ -260,41 +418,80 @@ function DtDisplay:getPngOverlayMenuList()
         separator = true,
     })
 
-    -- Select PNG folder
+    -- Portrait folder selection
     table.insert(menu_list, {
         text_func = function()
-            local folder = self.settings.png_overlay.folder_path
+            local folder = self.settings.png_overlay.portrait_folder_path
             if folder and folder ~= "" then
                 local short = folder:match("([^/]+)$") or folder
-                return T(_("PNG folder: %1"), short)
+                return T(_("Portrait PNG folder: %1"), short)
             else
-                return _("Select PNG folder")
+                return _("Select portrait PNG folder")
             end
         end,
         keep_menu_open = true,
         callback = function(touchmenu_instance)
-            self:showPngFolderChooser(touchmenu_instance)
+            self:showPngFolderChooser(touchmenu_instance, "portrait")
         end,
     })
 
-    -- Select single PNG file
+    -- Landscape folder selection
     table.insert(menu_list, {
         text_func = function()
-            local fpath = self.settings.png_overlay.single_file_path
+            local folder = self.settings.png_overlay.landscape_folder_path
+            if folder and folder ~= "" then
+                local short = folder:match("([^/]+)$") or folder
+                return T(_("Landscape PNG folder: %1"), short)
+            else
+                return _("Select landscape PNG folder")
+            end
+        end,
+        keep_menu_open = true,
+        callback = function(touchmenu_instance)
+            self:showPngFolderChooser(touchmenu_instance, "landscape")
+        end,
+        separator = true,
+    })
+
+    -- Select single PNG file for portrait
+    table.insert(menu_list, {
+        text_func = function()
+            local fpath = self.settings.png_overlay.single_file_path_portrait
             if fpath and fpath ~= "" then
                 local fname = fpath:match("([^/]+)$") or fpath
-                return T(_("Selected file: %1"), fname)
+                return T(_("Portrait file: %1"), fname)
             else
-                return _("Select a PNG file")
+                return _("Select a portrait PNG file")
             end
         end,
         keep_menu_open = true,
         enabled_func = function()
-            local folder = self.settings.png_overlay.folder_path
+            local folder = self.settings.png_overlay.portrait_folder_path
             return folder and folder ~= ""
         end,
         callback = function(touchmenu_instance)
-            self:showPngFileSelector(touchmenu_instance)
+            self:showPngFileSelector(touchmenu_instance, "portrait")
+        end,
+    })
+
+    -- Select single PNG file for landscape
+    table.insert(menu_list, {
+        text_func = function()
+            local fpath = self.settings.png_overlay.single_file_path_landscape
+            if fpath and fpath ~= "" then
+                local fname = fpath:match("([^/]+)$") or fpath
+                return T(_("Landscape file: %1"), fname)
+            else
+                return _("Select a landscape PNG file")
+            end
+        end,
+        keep_menu_open = true,
+        enabled_func = function()
+            local folder = self.settings.png_overlay.landscape_folder_path
+            return folder and folder ~= ""
+        end,
+        callback = function(touchmenu_instance)
+            self:showPngFileSelector(touchmenu_instance, "landscape")
         end,
         separator = true,
     })
@@ -341,6 +538,19 @@ function DtDisplay:getPngOverlayMenuList()
         callback = function(touchmenu_instance)
             self:showCycleIntervalSpinWidget(touchmenu_instance)
         end,
+        separator = true,
+    })
+
+    -- Full refresh on cycle toggle
+    table.insert(menu_list, {
+        text = _("Full screen refresh on image change"),
+        checked_func = function()
+            return self.settings.png_overlay.full_refresh_on_cycle
+        end,
+        callback = function()
+            self.settings.png_overlay.full_refresh_on_cycle = not self.settings.png_overlay.full_refresh_on_cycle
+            self:savePngOverlaySettings()
+        end,
     })
 
     return menu_list
@@ -353,9 +563,16 @@ function DtDisplay:savePngOverlaySettings()
 end
 
 --- Show folder chooser dialog for PNG folder selection
-function DtDisplay:showPngFolderChooser(touchmenu_instance)
+function DtDisplay:showPngFolderChooser(touchmenu_instance, orientation_type)
     local PathChooser = require("ui/widget/pathchooser")
-    local start_path = self.settings.png_overlay.folder_path
+    local setting_key
+    if orientation_type == "portrait" then
+        setting_key = "portrait_folder_path"
+    else
+        setting_key = "landscape_folder_path"
+    end
+
+    local start_path = self.settings.png_overlay[setting_key]
     if not start_path or start_path == "" then
         start_path = DataStorage:getDataDir()
     end
@@ -365,9 +582,13 @@ function DtDisplay:showPngFolderChooser(touchmenu_instance)
         select_file = false,
         path = start_path,
         onConfirm = function(chosen_path)
+            self.settings.png_overlay[setting_key] = chosen_path
             self.settings.png_overlay.folder_path = chosen_path
-            -- Reset single file selection when folder changes
-            self.settings.png_overlay.single_file_path = ""
+            if orientation_type == "portrait" then
+                self.settings.png_overlay.single_file_path_portrait = ""
+            else
+                self.settings.png_overlay.single_file_path_landscape = ""
+            end
             self:savePngOverlaySettings()
             if touchmenu_instance then
                 touchmenu_instance:updateItems()
@@ -377,10 +598,18 @@ function DtDisplay:showPngFolderChooser(touchmenu_instance)
     UIManager:show(path_chooser)
 end
 
---- Show file selector dialog to pick a single PNG from the selected folder.
--- Only shows files with valid resolution.
-function DtDisplay:showPngFileSelector(touchmenu_instance)
-    local folder = self.settings.png_overlay.folder_path
+--- Show file selector dialog to pick a single PNG.
+function DtDisplay:showPngFileSelector(touchmenu_instance, orientation_type)
+    local folder_key, file_key
+    if orientation_type == "portrait" then
+        folder_key = "portrait_folder_path"
+        file_key = "single_file_path_portrait"
+    else
+        folder_key = "landscape_folder_path"
+        file_key = "single_file_path_landscape"
+    end
+
+    local folder = self.settings.png_overlay[folder_key]
     if not folder or folder == "" then
         local InfoMessage = require("ui/widget/infomessage")
         UIManager:show(InfoMessage:new {
@@ -389,7 +618,6 @@ function DtDisplay:showPngFileSelector(touchmenu_instance)
         return
     end
 
-    -- Scan folder for PNG files
     local lfs = require("libs/libkoreader-lfs")
     local files = {}
     local ok, iter, dir_obj = pcall(lfs.dir, folder)
@@ -412,7 +640,6 @@ function DtDisplay:showPngFileSelector(touchmenu_instance)
 
     table.sort(files)
 
-    -- Filter by valid resolution using a temporary DisplayWidget helper
     local valid_files = {}
     local screen_size = Screen:getSize()
     local sw, sh = screen_size.w, screen_size.h
@@ -441,7 +668,6 @@ function DtDisplay:showPngFileSelector(touchmenu_instance)
         return
     end
 
-    -- Build a button dialog with the list of valid PNG files
     local ButtonDialogTitle = require("ui/widget/buttondialogtitle")
     local buttons = {}
     for _, fname in ipairs(valid_files) do
@@ -449,6 +675,7 @@ function DtDisplay:showPngFileSelector(touchmenu_instance)
             {
                 text = fname,
                 callback = function()
+                    self.settings.png_overlay[file_key] = folder .. "/" .. fname
                     self.settings.png_overlay.single_file_path = folder .. "/" .. fname
                     self:savePngOverlaySettings()
                     UIManager:close(self._png_file_dialog)
@@ -462,13 +689,13 @@ function DtDisplay:showPngFileSelector(touchmenu_instance)
     end
 
     self._png_file_dialog = ButtonDialogTitle:new {
-        title = _("Select a PNG file"),
+        title = T(_("Select a %1 PNG file"), orientation_type),
         buttons = buttons,
     }
     UIManager:show(self._png_file_dialog)
 end
 
---- Read PNG dimensions from file header (lightweight, no full image decode).
+--- Read PNG dimensions from file header.
 function DtDisplay:readPngDimensions(filepath)
     local f = io.open(filepath, "rb")
     if not f then
@@ -545,7 +772,6 @@ function DtDisplay:getFontMenuList(args)
         local font_filename, font_faceindex, is_monospace = cre.getFontFaceFilenameAndFaceIndex(v)
         table.insert(menu_list, {
             text_func = function()
-                -- defaults are hardcoded in credocument.lua
                 local default_font = G_reader_settings:readSetting("cre_font")
                 local fallback_font = G_reader_settings:readSetting("fallback_font")
                 local monospace_font = G_reader_settings:readSetting("monospace_font")
@@ -555,9 +781,9 @@ function DtDisplay:getFontMenuList(args)
                 end
 
                 if v == monospace_font then
-                    text = text .. " \u{1F13C}" -- Squared Latin Capital Letter M
+                    text = text .. " \u{1F13C}"
                 elseif is_monospace then
-                    text = text .. " \u{1D39}"  -- Modified Letter Capital M
+                    text = text .. " \u{1D39}"
                 end
                 if v == default_font then
                     text = text .. "   ★"
@@ -634,7 +860,6 @@ function DtDisplay:onDTDisplayLaunch()
 end
 
 function DtDisplay:showFontSizeSpinWidget(touchmenu_instance, font_size, callback)
-    -- Lazy loading the widget import
     local SpinWidget = require("ui/widget/spinwidget")
     UIManager:show(
         SpinWidget:new {
