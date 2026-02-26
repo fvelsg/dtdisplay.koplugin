@@ -11,6 +11,7 @@ Inspired by [clock.koplugin][2] and [kobo-display][3].
 
 ## Installation
 
+Before installing it you install the https://github.com/fvelsg/autosuspend-fork.koplugin/ exactly in the way it's recommended. They're connected plugind.
 Clone and copy this repository to the `koreader/plugins` folder.
 
 ## Usage
