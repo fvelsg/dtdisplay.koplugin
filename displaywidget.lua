@@ -9,7 +9,6 @@ local GestureRange = require("ui/gesturerange")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local NetworkMgr = require("ui/network/manager")
 local OverlapGroup = require("ui/widget/overlapgroup")
-local PluginShare = require("pluginshare")
 local Screen = Device.screen
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local UIManager = require("ui/uimanager")
@@ -35,8 +34,6 @@ function DisplayWidget:init()
     self.png_cycle_index = 1
     self.png_cycle_counter = 0
     self.png_file_list = nil
-
-    self.is_closing = false
 
     -- Rotation handling
     self.original_rotation = Screen:getRotationMode()
@@ -65,23 +62,6 @@ function DisplayWidget:init()
     -- Render
     UIManager:setDirty("all", "flashpartial")
     self[1] = self:render()
-    
-    -- SET AUTOSUSPEND TO 23h 59m (86340 seconds) WHEN LAUNCHED
-    self:setAutoSuspend(86340)
-end
-
--- -- New Helper Function to handle the timer
-function DisplayWidget:setAutoSuspend(seconds)
-    local autosuspend = PluginShare.live_autosuspend
-    if autosuspend then
-        autosuspend.auto_suspend_timeout_seconds = seconds
-        if type(autosuspend._unschedule) == "function" then
-            autosuspend:_unschedule()
-        end
-        if type(autosuspend._start) == "function" then
-            autosuspend:_start()
-        end
-    end
 end
 
 function DisplayWidget:applyClockRotation()
@@ -103,9 +83,7 @@ function DisplayWidget:refresh()
     self.now = os.time()
     self:update()
     -- Cycle PNG overlay if in cycle mode
-    if type(self.cyclePngOverlay) == "function" then
-        self:cyclePngOverlay()
-    end
+    self:cyclePngOverlay()
     UIManager:setDirty("all", "ui", self.datetime_vertical_group.dimen)
 end
 
@@ -114,14 +92,7 @@ function DisplayWidget:onShow()
 end
 
 function DisplayWidget:onResume()
-    -- Device woke up from suspend — restart the clock refresh timer
-    self.now = os.time()
-    self:update()
-    UIManager:setDirty("all", "flashpartial")
-
-    -- Restart the auto-refresh timer
     UIManager:unschedule(self.autoRefresh)
-    self:autoRefresh()
 end
 
 function DisplayWidget:onSuspend()
@@ -129,32 +100,17 @@ function DisplayWidget:onSuspend()
 end
 
 function DisplayWidget:onTapClose()
-    if self.is_closing then
-        return
-    end
-    self.is_closing = true
-
     UIManager:unschedule(self.autoRefresh)
     self:restoreRotation()
-    
-    -- SET AUTOSUSPEND BACK TO 15m (900 seconds) WHEN CLOSED
-    self:setAutoSuspend(900)
-    
     UIManager:close(self)
 end
 
 DisplayWidget.onAnyKeyPressed = DisplayWidget.onTapClose
 
 function DisplayWidget:onCloseWidget()
-    -- Safety net: ensure rotation and suspend are always restored even if closed externally
+    -- Safety net: ensure rotation is always restored even if closed externally
     self:restoreRotation()
-    self:setAutoSuspend(900)
 end
-
--- =========================================================
--- DO NOT MODIFY ANYTHING BELOW THIS LINE. 
--- Leave getWifiStatusText() and everything else as it is.
--- =========================================================
 
 function DisplayWidget:getWifiStatusText()
     if NetworkMgr:isWifiOn() then
@@ -252,6 +208,7 @@ function DisplayWidget:renderStatusWidget(width, font_face)
 end
 
 --- Read PNG dimensions from file header without loading the full image.
+-- PNG IHDR chunk: bytes 17-24 contain width (4 bytes BE) and height (4 bytes BE).
 function DisplayWidget:getPngDimensions(filepath)
     local f = io.open(filepath, "rb")
     if not f then
@@ -262,10 +219,12 @@ function DisplayWidget:getPngDimensions(filepath)
     if not header or #header < 24 then
         return nil, nil
     end
+    -- Verify PNG signature (first 8 bytes)
     local png_sig = "\137PNG\r\n\026\n"
     if header:sub(1, 8) ~= png_sig then
         return nil, nil
     end
+    -- Width at bytes 17-20, Height at bytes 21-24 (big-endian)
     local function read_be_uint32(s, offset)
         local b1, b2, b3, b4 = s:byte(offset, offset + 3)
         return b1 * 16777216 + b2 * 65536 + b3 * 256 + b4
@@ -276,9 +235,11 @@ function DisplayWidget:getPngDimensions(filepath)
 end
 
 --- Get the native portrait resolution of the device.
+-- Returns width, height where width < height (portrait).
 function DisplayWidget:getNativePortraitResolution()
     local screen_size = Screen:getSize()
     local sw, sh = screen_size.w, screen_size.h
+    -- Ensure portrait: width < height
     if sw > sh then
         return sh, sw
     end
@@ -291,7 +252,11 @@ function DisplayWidget:isPortraitOrientation()
     return screen_size.w <= screen_size.h
 end
 
---- Check if a PNG file has valid dimensions.
+--- Check if a PNG file has valid dimensions (matches native or inverted native resolution).
+-- Returns:
+--   "normal" if image matches portrait resolution (w x h where w < h)
+--   "inverted" if image matches landscape resolution (h x w)
+--   nil if image dimensions don't match either
 function DisplayWidget:checkPngResolution(filepath)
     local img_w, img_h = self:getPngDimensions(filepath)
     if not img_w or not img_h then
@@ -306,67 +271,8 @@ function DisplayWidget:checkPngResolution(filepath)
     return nil
 end
 
---- Get the active folder path based on current orientation.
-function DisplayWidget:getActiveFolderPath()
-    local overlay_settings = self.props and self.props.png_overlay
-    if not overlay_settings then
-        return nil
-    end
-
-    if self:isPortraitOrientation() then
-        local folder = overlay_settings.portrait_folder_path
-        if folder and folder ~= "" then
-            return folder
-        end
-        local legacy = overlay_settings.folder_path
-        if legacy and legacy ~= "" then
-            return legacy
-        end
-    else
-        local folder = overlay_settings.landscape_folder_path
-        if folder and folder ~= "" then
-            return folder
-        end
-        local legacy = overlay_settings.folder_path
-        if legacy and legacy ~= "" then
-            return legacy
-        end
-    end
-
-    return nil
-end
-
---- Get the active single file path based on current orientation.
-function DisplayWidget:getActiveSingleFilePath()
-    local overlay_settings = self.props and self.props.png_overlay
-    if not overlay_settings then
-        return nil
-    end
-
-    if self:isPortraitOrientation() then
-        local fpath = overlay_settings.single_file_path_portrait
-        if fpath and fpath ~= "" then
-            return fpath
-        end
-        local legacy = overlay_settings.single_file_path
-        if legacy and legacy ~= "" then
-            return legacy
-        end
-    else
-        local fpath = overlay_settings.single_file_path_landscape
-        if fpath and fpath ~= "" then
-            return fpath
-        end
-        local legacy = overlay_settings.single_file_path
-        if legacy and legacy ~= "" then
-            return legacy
-        end
-    end
-
-    return nil
-end
-
---- Get sorted list of valid PNG files from the active folder.
+--- Get sorted list of valid PNG files from the configured folder.
+-- Each entry is a table: { filename = "...", resolution_type = "normal"|"inverted" }
 function DisplayWidget:getPngFileList()
     if self.png_file_list then
         return self.png_file_list
@@ -377,8 +283,8 @@ function DisplayWidget:getPngFileList()
         return nil
     end
 
-    local folder = self:getActiveFolderPath()
-    if not folder then
+    local folder = overlay_settings.folder_path
+    if not folder or folder == "" then
         return nil
     end
 
@@ -419,10 +325,14 @@ function DisplayWidget:getPngFileList()
 end
 
 --- Determine the rotation angle needed for a given image resolution type.
+-- In portrait mode: inverted images need 90° rotation to fill screen.
+-- In landscape mode: never rotate.
 function DisplayWidget:getImageRotationAngle(resolution_type)
     if not self:isPortraitOrientation() then
+        -- Landscape: never rotate
         return 0
     end
+    -- Portrait
     if resolution_type == "inverted" then
         return 90
     end
@@ -430,6 +340,7 @@ function DisplayWidget:getImageRotationAngle(resolution_type)
 end
 
 --- Get the current PNG file path and its resolution type.
+-- Returns: filepath, resolution_type  or  nil, nil
 function DisplayWidget:getCurrentPngPathAndType()
     local overlay_settings = self.props and self.props.png_overlay
     if not overlay_settings or not overlay_settings.enabled then
@@ -439,8 +350,8 @@ function DisplayWidget:getCurrentPngPathAndType()
     local mode = overlay_settings.mode or "single"
 
     if mode == "single" then
-        local single_path = self:getActiveSingleFilePath()
-        if single_path then
+        local single_path = overlay_settings.single_file_path
+        if single_path and single_path ~= "" then
             local res_type = self:checkPngResolution(single_path)
             if res_type then
                 return single_path, res_type
@@ -452,10 +363,7 @@ function DisplayWidget:getCurrentPngPathAndType()
         if not files or #files == 0 then
             return nil, nil
         end
-        local folder = self:getActiveFolderPath()
-        if not folder then
-            return nil, nil
-        end
+        local folder = overlay_settings.folder_path
         if self.png_cycle_index > #files then
             self.png_cycle_index = 1
         end
@@ -475,16 +383,8 @@ function DisplayWidget:getCycleMinutes()
     return 1
 end
 
---- Check if full refresh on cycle is enabled
-function DisplayWidget:isFullRefreshOnCycle()
-    local overlay_settings = self.props and self.props.png_overlay
-    if overlay_settings then
-        return overlay_settings.full_refresh_on_cycle == true
-    end
-    return false
-end
-
 --- Cycle to the next PNG image based on configured interval.
+-- Called on each refresh (~every minute).
 function DisplayWidget:cyclePngOverlay()
     local overlay_settings = self.props and self.props.png_overlay
     if not overlay_settings or not overlay_settings.enabled then
@@ -511,12 +411,7 @@ function DisplayWidget:cyclePngOverlay()
 
         -- Update the overlay widget with the new image
         self:updatePngOverlayWidget()
-
-        local refresh_mode = "ui"
-        if self:isFullRefreshOnCycle() then
-            refresh_mode = "full"
-        end
-        UIManager:setDirty("all", refresh_mode)
+        UIManager:setDirty("all", "ui")
     end
 end
 
@@ -569,6 +464,7 @@ function DisplayWidget:updatePngOverlayWidget()
             rotation_angle = rotation_angle,
         }
 
+        -- Replace overlay in the overlap group (second element)
         self.png_overlay_widget = new_widget
         if self.overlap_group and #self.overlap_group >= 2 then
             self.overlap_group[2] = new_widget
@@ -642,13 +538,11 @@ function DisplayWidget:render()
         vertical_group
     }
 
-    -- Reset file list cache when rendering (orientation may have changed)
-    self.png_file_list = nil
-
     -- Build PNG overlay if enabled
     self.png_overlay_widget = self:createPngOverlayWidget()
 
     if self.png_overlay_widget then
+        -- Use OverlapGroup to layer the PNG on top of the clock
         self.overlap_group = OverlapGroup:new {
             dimen = Geom:new { w = screen_size.w, h = screen_size.h },
             clock_frame,
