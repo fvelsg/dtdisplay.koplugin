@@ -88,6 +88,15 @@ function DisplayWidget:init()
             SystemUtils.setAutoSuspend(self.props.suspend.custom_timeout_minutes * 60)
         end
     end
+
+    self.original_brightness = nil
+
+    if self.props.widget_brightness and self.props.widget_brightness >= 0 then
+        if SystemUtils.hasFrontlight() then
+            self.original_brightness = SystemUtils.getBrightness()
+            SystemUtils.setBrightness(self.props.widget_brightness)
+        end
+    end    
 end
 
 function DisplayWidget:applyClockRotation()
@@ -143,6 +152,10 @@ function DisplayWidget:onTapClose()
     UIManager:unschedule(self.autoRefresh)
     self:restoreRotation()
     
+    if self.original_brightness then
+        SystemUtils.setBrightness(self.original_brightness)
+    end
+
     -- RESTORE ORIGINAL AUTOSUSPEND
     if self.original_autosuspend_timeout then
         SystemUtils.setAutoSuspend(self.original_autosuspend_timeout)
@@ -159,6 +172,10 @@ function DisplayWidget:onCloseWidget()
     if self.original_autosuspend_timeout then
         SystemUtils.setAutoSuspend(self.original_autosuspend_timeout)
     end
+    if self.original_brightness then
+        SystemUtils.setBrightness(self.original_brightness)
+    end
+
 end
 
 

@@ -135,7 +135,12 @@ function DtDisplay:initLuaSettings()
         }
         self.local_storage:flush()
     end
+
+    if self.local_storage.data.widget_brightness == nil then
+        self.local_storage.data.widget_brightness = -1
+    end
 end
+----
 
 function DtDisplay:addToMainMenu(menu_items)
     menu_items.dtdisplay = {
@@ -220,6 +225,19 @@ function DtDisplay:addToMainMenu(menu_items)
                 text = _("PNG overlay"),
                 separator = false,
                 sub_item_table = self:getPngOverlayMenuList(),
+            },
+            {
+                text = _("Widget Brightness"),
+                separator = false,
+                keep_menu_open = true,
+                callback = function(touchmenu_instance)
+                    self:showBrightnessSpinWidget(touchmenu_instance, self.settings.widget_brightness, function(new_val)
+                        self.settings.widget_brightness = new_val
+                        -- Save the setting immediately when changed
+                        self.local_storage:reset(self.settings)
+                        self.local_storage:flush()
+                    end)
+                end,
             },
         },
     }
@@ -881,5 +899,32 @@ end
 function DtDisplay:onDispatcherRegisterActions()
     Dispatcher:registerAction("dtdisplay_launch", { category="none", event="DTDisplayLaunch", title=_("Launch Time & Day"), general=true})
 end
+
+function DtDisplay:showBrightnessSpinWidget(touchmenu_instance, current_brightness, callback)
+    local SpinWidget = require("ui/widget/spinwidget")
+    local max_intensity = 24
+    if Device:hasFrontlight() then
+        local powerd = Device:getPowerDevice()
+        if powerd and powerd.fl_max then
+            max_intensity = powerd.fl_max
+        end
+    end
+    UIManager:show(
+        SpinWidget:new {
+            value = current_brightness,
+            value_min = -1, -- Allow -1 to disable the feature
+            value_max = max_intensity,
+            value_step = 1,
+            value_hold_step = 5,
+            ok_text = _("Set brightness"),
+            title_text = _("Widget Brightness (-1 to disable)"),
+            callback = function(spin)
+                callback(spin.value)
+                touchmenu_instance:updateItems()
+            end
+        }
+    )
+end
+
 
 return DtDisplay
