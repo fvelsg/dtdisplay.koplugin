@@ -72,7 +72,7 @@ function DisplayWidget:init()
     self.covers_fullscreen = true
 
     -- Render
-    UIManager:setDirty("all", "flashpartial")
+    UIManager:setDirty("all", "full") -- return to flashpartial if crashes
     self[1] = self:render()
     
     -- Store original autosuspend timeout and apply new logic based on menu settings
@@ -132,7 +132,7 @@ function DisplayWidget:onResume()
     -- Device woke up from suspend — restart the clock refresh timer
     self.now = os.time()
     self:update()
-    UIManager:setDirty("all", "flashpartial")
+    UIManager:setDirty("all", "full") -- return to flash partial if it crashes
 
     -- Restart the auto-refresh timer
     UIManager:unschedule(self.autoRefresh)
