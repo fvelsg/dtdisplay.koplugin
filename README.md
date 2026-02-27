@@ -18,6 +18,15 @@ Clone and copy this repository to the `koreader/plugins` folder.
 
 Navigate to `Plugins -> More tools -> Time & Day` to open the widget. Tap
 anywhere on the screen to close the widget.
+	•	**Launch**: Opens the clock and displays it on your screen.
+	•	**Date widget font**: Changes the text style and size for the date.
+	•	**Time widget font**: Changes the text style and size for the time.
+	•	**Status line font**: Changes the text style and size for the battery and reading progress at the bottom.
+	•	**Clock orientation**: Flips the clock to display in portrait, landscape, or matches your device's current rotation.
+	•	**Suspend settings**: Controls if and when your device is allowed to go to sleep while the clock is open.
+	•	**PNG overlay**: Lets you add and manage custom background images to show behind the text.
+	•	**Widget Brightness**: Sets a specific screen light level to be used only while the clock is running.
+
 
 ## Testing
 
