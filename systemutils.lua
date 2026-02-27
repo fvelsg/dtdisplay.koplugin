@@ -30,23 +30,29 @@ end
 function SystemUtils.hasFrontlight()
     if not Device:hasFrontlight() then return false end
     local powerd = Device:getPowerDevice()
-    -- powerd is the correct cross-device frontlight API.
-    -- Device.flc (kobolight) only exists on Kobo and is nil on Kindle.
     return powerd ~= nil and type(powerd.setIntensity) == "function"
 end
 
 function SystemUtils.getBrightness()
     if not SystemUtils.hasFrontlight() then return nil end
-    return Device:getPowerDevice().fl_intensity
+    local powerd = Device:getPowerDevice()
+    if type(powerd.isFrontlightOn) == "function" and not powerd:isFrontlightOn() then
+        return 0
+    end
+    return powerd.fl_intensity
 end
 
 function SystemUtils.setBrightness(level)
     if not SystemUtils.hasFrontlight() or not level then return end
     local powerd = Device:getPowerDevice()
+    if level <= 0 then
+        if type(powerd.turnOffFrontlight) == "function" then
+            powerd:turnOffFrontlight()
+        end
+        return
+    end
     local max_intensity = powerd.fl_max or 24
-    local min_intensity = powerd.fl_min or 0
     if level > max_intensity then level = max_intensity end
-    if level < min_intensity then level = min_intensity end
     powerd:setIntensity(level)
 end
 
