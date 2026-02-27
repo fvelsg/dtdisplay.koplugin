@@ -49,6 +49,7 @@ Linux x86 Appimage.
 <img width="268" alt="FileManager_2026-02-27_074036" src="https://github.com/user-attachments/assets/137c61eb-ef68-4805-aa14-9b532366f2c7" />
 <img width="268" alt="FileManager_2026-02-27_070740" src="https://github.com/user-attachments/assets/ef6a300e-fb5a-4f41-ac55-177c822c5139" />
 
+
 </br>
 </br>
 </br>
@@ -66,5 +67,13 @@ Linux x86 Appimage.
 <img width="268" alt="FileManager_2026-02-27_070513" src="https://github.com/user-attachments/assets/9944b5ed-1ef8-4443-ab22-9e73dc26ce80" />
 <img width="268" alt="FileManager_2026-02-27_070557" src="https://github.com/user-attachments/assets/e4bab56e-0dc9-442d-8206-2be3bc9b7d71" />
 <img width="268" alt="FileManager_2026-02-27_070603" src="https://github.com/user-attachments/assets/8646c4af-ca08-4052-b9e4-78f82ff0bca6" />
+
+
+
+### Screensavers credits: 
+</br>
+1- https://drive.google.com/file/d/1rmRj2OyCKhZkv50byYD_cq8Ex1sWWg6Z/view?usp=sharing </br>
+2- https://readerbackdrop.com/backgrounds/a1f9e8197b79b64 </br>
+3- https://readerbackdrop.com/backgrounds/a30a411cbb4c087 </br>
 
 
