@@ -126,6 +126,11 @@ function DtDisplay:initLuaSettings()
         self.local_storage:flush()
     end
 
+    if self.local_storage.data.png_overlay.invert_with_night_mode == nil then
+        self.local_storage.data.png_overlay.invert_with_night_mode = true
+        self.local_storage:flush()
+    end
+
     -- Migration: ensure suspend settings exist
     if self.local_storage.data.suspend == nil then
         self.local_storage.data.suspend = {
@@ -696,6 +701,20 @@ function DtDisplay:getPngOverlayMenuList()
             self.settings.png_overlay.full_refresh_on_cycle = not self.settings.png_overlay.full_refresh_on_cycle
             self:savePngOverlaySettings()
         end,
+    })
+
+    -- Night mode image inversion toggle
+    table.insert(menu_list, {
+        text = _("Invert image in night mode"),
+        checked_func = function()
+            return self.settings.png_overlay.invert_with_night_mode ~= false
+        end,
+        callback = function()
+            self.settings.png_overlay.invert_with_night_mode =
+                not (self.settings.png_overlay.invert_with_night_mode ~= false)
+            self:savePngOverlaySettings()
+        end,
+        separator = true,
     })
 
     return menu_list

@@ -84,7 +84,8 @@ function DisplayWidget:init()
     -- Night mode: since we cover fullscreen, KOReader's own NightModeWidget
     -- is hidden beneath us. We own the inversion entirely via paintTo.
     self.apply_night_inversion = getEffectiveNightMode(self.props)
-
+    self.invert_png_overlay = not (self.props.png_overlay
+        and self.props.png_overlay.invert_with_night_mode == false)
 
     -- Render
     UIManager:setDirty("all", "full") -- return to flashpartial if crashes
@@ -567,13 +568,17 @@ function DisplayWidget:render()
 end
 
 function DisplayWidget:paintTo(bb, x, y)
-    -- Paint all children normally (including PNG overlay)
-    InputContainer.paintTo(self, bb, x, y)
-    -- Then invert the entire painted area if needed.
-    -- This runs AFTER ImageWidget has blitted its raw pixels,
-    -- so the PNG gets inverted along with everything else.
-    if self.apply_night_inversion then
+    if self.apply_night_inversion and self.overlap_group and not self.invert_png_overlay then
+        -- Paint clock frame, invert it, then paint PNG on top untouched
+        self.overlap_group[1]:paintTo(bb, x, y)
         bb:invertRect(x, y, Screen:getWidth(), Screen:getHeight())
+        self.overlap_group[2]:paintTo(bb, x, y)
+    else
+        -- No PNG, or user wants everything inverted: paint all then invert
+        InputContainer.paintTo(self, bb, x, y)
+        if self.apply_night_inversion then
+            bb:invertRect(x, y, Screen:getWidth(), Screen:getHeight())
+        end
     end
 end
 
