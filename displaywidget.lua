@@ -33,10 +33,21 @@ local DisplayWidget = InputContainer:extend {
 
 local function getEffectiveNightMode(props)
     local setting = props and props.night_mode or "follow"
-    if setting == "night" then return true end
-    if setting == "normal" then return false end
-    return G_reader_settings:isTrue("night_mode")
+    local koreader_night = G_reader_settings:isTrue("night_mode")
+
+    local desired_night
+    if setting == "night" then
+        desired_night = true
+    elseif setting == "normal" then
+        desired_night = false
+    else  -- "follow"
+        desired_night = koreader_night
+    end
+    -- XOR: if desired == koreader, do nothing (KOReader handles it).
+    --      if desired != koreader, invert to counteract/override it.
+    return desired_night ~= koreader_night
 end
+
 
 function DisplayWidget:init()
     -- Properties
