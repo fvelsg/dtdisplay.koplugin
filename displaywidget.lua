@@ -33,13 +33,9 @@ local DisplayWidget = InputContainer:extend {
 
 local function getEffectiveNightMode(props)
     local setting = props and props.night_mode or "follow"
-    if setting == "night" then
-        return true
-    elseif setting == "normal" then
-        return false
-    else -- "follow"
-        return G_reader_settings:isTrue("night_mode")
-    end
+    if setting == "night" then return true end
+    if setting == "normal" then return false end
+    return G_reader_settings:isTrue("night_mode")
 end
 
 function DisplayWidget:init()
@@ -85,12 +81,9 @@ function DisplayWidget:init()
 
 
     -- Nightmode 
-    self.original_night_mode = Screen.night_mode or false
-    local desired_night_mode = getEffectiveNightMode(self.props)
-    self.night_mode_changed = (desired_night_mode ~= self.original_night_mode)
-    if self.night_mode_changed then
-        Screen:toggleNightMode()
-    end
+    -- Night mode: since we cover fullscreen, KOReader's own NightModeWidget
+    -- is hidden beneath us. We own the inversion entirely via paintTo.
+    self.apply_night_inversion = getEffectiveNightMode(self.props)
 
 
     -- Render
@@ -193,12 +186,6 @@ function DisplayWidget:onTapClose()
     if self.original_autosuspend_timeout then
         SystemUtils.setAutoSuspend(self.original_autosuspend_timeout)
     end
-    
-    if self.night_mode_changed then
-        Screen:toggleNightMode()
-        self.night_mode_changed = false
-    end
-
     UIManager:close(self)
 end
 
@@ -212,10 +199,6 @@ function DisplayWidget:onCloseWidget()
     end
     if self.original_brightness then
         SystemUtils.setBrightness(self.original_brightness)
-    end
-    if self.night_mode_changed then
-        Screen:toggleNightMode()
-        self.night_mode_changed = false
     end
 
 end
@@ -580,6 +563,17 @@ function DisplayWidget:render()
     else
         self.overlap_group = nil
         return clock_frame
+    end
+end
+
+function DisplayWidget:paintTo(bb, x, y)
+    -- Paint all children normally (including PNG overlay)
+    InputContainer.paintTo(self, bb, x, y)
+    -- Then invert the entire painted area if needed.
+    -- This runs AFTER ImageWidget has blitted its raw pixels,
+    -- so the PNG gets inverted along with everything else.
+    if self.apply_night_inversion then
+        bb:invertRect(x, y, Screen:getWidth(), Screen:getHeight())
     end
 end
 
