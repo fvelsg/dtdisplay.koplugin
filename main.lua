@@ -144,6 +144,11 @@ function DtDisplay:initLuaSettings()
         self.local_storage.data.full_refresh_minutes = 0 -- 0 = disabled
     end
 
+    if self.local_storage.data.night_mode == nil then
+        self.local_storage.data.night_mode = "follow"
+        self.local_storage:flush()
+    end
+
     if self.local_storage.data.clock_format == nil then
         self.local_storage.data.clock_format = "follow"
         self.local_storage:flush()
@@ -229,6 +234,11 @@ function DtDisplay:addToMainMenu(menu_items)
                 text = _("Clock format"),
                 separator = false,
                 sub_item_table = self:getClockFormatMenuList(),
+            },
+            {
+                text = _("Night mode"),
+                separator = false,
+                sub_item_table = self:getNightModeMenuList(),
             },
             {
                 text = _("Suspend settings"),
@@ -349,6 +359,45 @@ function DtDisplay:getClockFormatMenuList()
             end,
         },
     }
+end
+
+function DtDisplay:getNightModeMenuList()
+    return {
+        {
+            text = _("Follow KOReader setting"),
+            checked_func = function()
+                return self.settings.night_mode == "follow"
+            end,
+            callback = function()
+                self:setNightMode("follow")
+            end,
+            separator = true,
+        },
+        {
+            text = _("Light mode"),
+            checked_func = function()
+                return self.settings.night_mode == "normal"
+            end,
+            callback = function()
+                self:setNightMode("normal")
+            end,
+        },
+        {
+            text = _("Night mode"),
+            checked_func = function()
+                return self.settings.night_mode == "night"
+            end,
+            callback = function()
+                self:setNightMode("night")
+            end,
+        },
+    }
+end
+
+function DtDisplay:setNightMode(mode)
+    self.settings.night_mode = mode
+    self.local_storage:reset(self.settings)
+    self.local_storage:flush()
 end
 
 function DtDisplay:setClockFormat(fmt)

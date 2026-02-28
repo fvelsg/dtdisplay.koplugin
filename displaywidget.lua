@@ -31,6 +31,17 @@ local DisplayWidget = InputContainer:extend {
     props = {},
 }
 
+local function getEffectiveNightMode(props)
+    local setting = props and props.night_mode or "follow"
+    if setting == "night" then
+        return true
+    elseif setting == "normal" then
+        return false
+    else -- "follow"
+        return G_reader_settings:isTrue("night_mode")
+    end
+end
+
 function DisplayWidget:init()
     -- Properties
     self.now = os.time()
@@ -71,6 +82,16 @@ function DisplayWidget:init()
 
     -- Hints
     self.covers_fullscreen = true
+
+
+    -- Nightmode 
+    self.original_night_mode = Screen.night_mode or false
+    local desired_night_mode = getEffectiveNightMode(self.props)
+    self.night_mode_changed = (desired_night_mode ~= self.original_night_mode)
+    if self.night_mode_changed then
+        Screen:toggleNightMode()
+    end
+
 
     -- Render
     UIManager:setDirty("all", "full") -- return to flashpartial if crashes
@@ -173,6 +194,11 @@ function DisplayWidget:onTapClose()
         SystemUtils.setAutoSuspend(self.original_autosuspend_timeout)
     end
     
+    if self.night_mode_changed then
+        Screen:toggleNightMode()
+        self.night_mode_changed = false
+    end
+
     UIManager:close(self)
 end
 
@@ -186,6 +212,10 @@ function DisplayWidget:onCloseWidget()
     end
     if self.original_brightness then
         SystemUtils.setBrightness(self.original_brightness)
+    end
+    if self.night_mode_changed then
+        Screen:toggleNightMode()
+        self.night_mode_changed = false
     end
 
 end
