@@ -139,6 +139,15 @@ function DtDisplay:initLuaSettings()
     if self.local_storage.data.widget_brightness == nil then
         self.local_storage.data.widget_brightness = -1
     end
+
+    if self.local_storage.data.full_refresh_minutes == nil then
+        self.local_storage.data.full_refresh_minutes = 0 -- 0 = disabled
+    end
+
+    if self.local_storage.data.clock_format == nil then
+        self.local_storage.data.clock_format = "follow"
+        self.local_storage:flush()
+    end
 end
 ----
 
@@ -217,6 +226,11 @@ function DtDisplay:addToMainMenu(menu_items)
                 sub_item_table = self:getRotationMenuList(),
             },
             {
+                text = _("Clock format"),
+                separator = false,
+                sub_item_table = self:getClockFormatMenuList(),
+            },
+            {
                 text = _("Suspend settings"),
                 separator = false,
                 sub_item_table = self:getSuspendMenuList(),
@@ -237,6 +251,30 @@ function DtDisplay:addToMainMenu(menu_items)
                         self.local_storage:reset(self.settings)
                         self.local_storage:flush()
                     end)
+                end,
+            },
+            {
+                text_func = function()
+                    local total = self.settings.full_refresh_minutes or 0
+                    if total == 0 then
+                        return _("Full refresh: disabled")
+                    end
+
+                    local h = math.floor(total / 60)
+                    local m = total % 60
+                    if h == 0 then 
+                        return T(_("Full refresh: every %1 min"), m)
+                    elseif m == 0 then
+                        return T(_("Full refresh: every %1 h"), h)
+                    else
+                        return T(_("Full refresh: every %1 h %2 min"), h, m)
+                    end
+                end,
+                
+                keep_menu_open = true,
+            
+                callback = function(touchmenu_instance)
+                    self:showFullRefreshSpinWidget(touchmenu_instance)
                 end,
             },
         },
@@ -279,6 +317,46 @@ function DtDisplay:getRotationMenuList()
 
     return menu_list
 end
+
+function DtDisplay:getClockFormatMenuList()
+    return {
+        {
+            text = _("Follow KOReader setting"),
+            checked_func = function()
+                return self.settings.clock_format == "follow"
+            end,
+            callback = function()
+                self:setClockFormat("follow")
+            end,
+            separator = true,
+        },
+        {
+            text = _("24-hour"),
+            checked_func = function()
+                return self.settings.clock_format == "24"
+            end,
+            callback = function()
+                self:setClockFormat("24")
+            end,
+        },
+        {
+            text = _("12-hour (AM/PM)"),
+            checked_func = function()
+                return self.settings.clock_format == "12"
+            end,
+            callback = function()
+                self:setClockFormat("12")
+            end,
+        },
+    }
+end
+
+function DtDisplay:setClockFormat(fmt)
+    self.settings.clock_format = fmt
+    self.local_storage:reset(self.settings)
+    self.local_storage:flush()
+end
+
 
 function DtDisplay:setRotationFollowKOReader(follow)
     self.settings.rotation.follow_koreader = follow
@@ -926,5 +1004,28 @@ function DtDisplay:showBrightnessSpinWidget(touchmenu_instance, current_brightne
     )
 end
 
+function DtDisplay:showFullRefreshSpinWidget(touchmenu_instance)
+    local total_minutes = self.settings.full_refresh_minutes or 0
+    local current_hours = math.floor(total_minutes / 60)
+    local current_minutes = total_minutes % 60
+
+    local DateTimeWidget = require("ui/widget/datetimewidget")
+
+    UIManager:show(DateTimeWidget:new {
+        hour = current_hours,
+        min = current_minutes,
+        ok_text = _("Set interval"),
+        title_text = _("Full refresh interval (0h 0min = disabled)"),
+        callback = function(time)
+            local total = time.hour * 60 + time.min
+            self.settings.full_refresh_minutes = total
+            self.local_storage:reset(self.settings)
+            self.local_storage:flush()
+            if touchmenu_instance then
+                touchmenu_instance:updateItems()
+            end
+        end,
+    })
+end
 
 return DtDisplay

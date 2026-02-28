@@ -43,6 +43,7 @@ function DisplayWidget:init()
     self.png_overlay_widget = nil
     self.png_cycle_index = 1
     self.png_cycle_counter = 0
+    self.full_refresh_counter = 0 
     self.png_file_list = nil
 
     self.is_closing = false
@@ -121,6 +122,17 @@ function DisplayWidget:refresh()
     if type(self.cyclePngOverlay) == "function" then
         self:cyclePngOverlay()
     end
+
+    local full_refresh_minutes = self.props.full_refresh_minutes
+    if full_refresh_minutes and full_refresh_minutes > 0 then
+        self.full_refresh_counter = self.full_refresh_counter + 1
+        if self.full_refresh_counter >= full_refresh_minutes then 
+            self.full_refresh_counter = 0
+            UIManager:setDirty("all", "full")
+            return
+        end
+    end
+
     UIManager:setDirty("all", "ui", self.datetime_vertical_group.dimen)
 end
 
@@ -180,7 +192,7 @@ end
 
 
 function DisplayWidget:update()
-    local time_text = TimeUtils.getTimeText(self.now)
+    local time_text = TimeUtils.getTimeText(self.now, self.props.clock_format)
     local date_text = TimeUtils.getDateText(self.now, true)
     local status_text = StatusUtils.getStatusText()
 
@@ -465,7 +477,8 @@ function DisplayWidget:render()
         Font:getFace(
             self.props.time_widget.font_name,
             self.props.time_widget.font_size
-        )
+        ),
+        self.props.clock_format  
     )
     self.date_widget = RenderUtils.renderDateWidget(
         self.now,

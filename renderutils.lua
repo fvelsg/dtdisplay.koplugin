@@ -8,9 +8,10 @@ local StatusUtils = require("statusutils")
 
 local RenderUtils = {}
 
-function RenderUtils.renderTimeWidget(now, width, font_face)
+-- clock_format: "follow" | "24" | "12"  (forwarded to TimeUtils)
+function RenderUtils.renderTimeWidget(now, width, font_face, clock_format)
     return TextBoxWidget:new {
-        text = TimeUtils.getTimeText(now),
+        text = TimeUtils.getTimeText(now, clock_format),
         face = font_face or Font:getFace("tfont", 119),
         width = width or Screen:getWidth(),
         alignment = "center",
