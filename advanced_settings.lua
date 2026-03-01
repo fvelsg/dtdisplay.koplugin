@@ -4,9 +4,10 @@
 -- priority over the UI. Set any field to nil (or omit it) to keep the UI value.
 
 return {
+    -- WIDGETS --
     time_widget = {
-        font_size = nil,   -- e.g. 150  (overrides the UI font size slider)
-        font_name = nil,   -- e.g. "./fonts/noto/NotoSans-Bold.ttf"
+        font_size = nil,  -- e.g. 150 (overrides the UI font size slider)
+        font_name = nil,  -- e.g. "./fonts/noto/NotoSans-Bold.ttf"
     },
     date_widget = {
         font_size = nil,
@@ -16,6 +17,53 @@ return {
         font_size = nil,
         font_name = nil,
     },
-    clock_format  = "follow",  -- "24", "12", or "follow"
-    night_mode    = "follow",  -- "night", "normal"(that is light mode), or "follow"
+
+    -- CLOCK ORIENTATION --
+    -- To use a custom rotation, set follow_koreader = false AND set custom_rotation.
+    -- custom_rotation values: 0 = portrait, 1 = landscape CW, 2 = portrait inverted, 3 = landscape CCW
+    rotation = {
+        follow_koreader = "false",   -- true or false
+        custom_rotation = 0,   -- 0, 1, 2, or 3
+    },
+
+    -- SUSPEND BEHAVIOUR --
+    -- The same rules as rotation apply: set all three together for predictable results.
+    suspend = {
+        never_suspend          = nil,  -- true = never suspend while clock runs
+        custom_timeout_enabled = nil,  -- true = use the timeout below instead of KOReader default
+        custom_timeout_minutes = nil,  -- e.g. 30
+    },
+
+    png_overlay = {
+        enabled                  = true,  -- true or false
+        mode                     = nil,  -- "single" or "cycle"
+        
+        -- Single mode paths (portrait and landscape)
+        single_file_path_portrait  = nil,  -- e.g. "/mnt/us/covers/my_cover.png"
+        single_file_path_landscape = nil,
+        single_file_path           = nil,  -- legacy fallback used if portrait/landscape are empty
+
+        -- Cycle mode folder paths
+        portrait_folder_path   = nil,  -- folder containing PNGs for portrait
+        landscape_folder_path  = nil,
+        folder_path            = nil,  -- legacy fallback
+
+        cycle_minutes          = nil,  -- how often to cycle to the next image
+        full_refresh_on_cycle  = nil,  -- true = full e-ink refresh on each cycle
+        invert_with_night_mode = nil,  -- false = keep PNG uninverted when night mode is on
+    },
+
+    -- WIDGET BRIGHTNESS --
+    -- Set to -1 to disable (use device default), or 0–24 (device max may vary)
+    widget_brightness = -1,
+
+    -- FULL REFRESH INTERVAL --
+    -- Number of minutes between full e-ink refreshes. Set to 0 to disable.
+    full_refresh_minutes = nil,
+
+    -- CLOCK & DISPLAY --
+    clock_format = nil,  -- "24", "12", or "follow"
+    night_mode   = nil,  -- "night", "normal", or "follow"
+
+
 }
