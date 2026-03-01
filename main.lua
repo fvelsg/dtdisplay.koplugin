@@ -11,6 +11,8 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local cre -- delayed loading
 local _ = require("gettext")
 local T = require("ffi/util").template
+local PLUGIN_DIR = debug.getinfo(1, "S").source:match("^@(.+/)[^/]+$") or "./"
+
 
 local DtDisplay = WidgetContainer:extend {
     name = "dtdisplay",
@@ -158,6 +160,11 @@ function DtDisplay:initLuaSettings()
         self.local_storage.data.clock_format = "follow"
         self.local_storage:flush()
     end
+    -- Migration: ensure advanced_settings toggle exists
+    if self.local_storage.data.advanced_settings_enabled == nil then
+        self.local_storage.data.advanced_settings_enabled = false
+        self.local_storage:flush()
+    end
 end
 ----
 
@@ -295,13 +302,16 @@ end
 --         },
 --     }
 -- end
+
+
+
 function DtDisplay:addToMainMenu(menu_items)
     -- Quick-launch shortcut in the "screen" section, near KOReader's night mode toggle
     menu_items.dtdisplay_shortcut = {
         text = _("Time & Day clock"),
         sorting_hint = "screen",
         callback = function()
-            UIManager:show(DisplayWidget:new { props = self.settings })
+            UIManager:show(DisplayWidget:new { props = self:getEffectiveProps() })
         end,
     }
 
@@ -314,7 +324,7 @@ function DtDisplay:addToMainMenu(menu_items)
                 text = _("Launch"),
                 separator = true,
                 callback = function()
-                    UIManager:show(DisplayWidget:new { props = self.settings })
+                    UIManager:show(DisplayWidget:new { props = self:getEffectiveProps() })
                 end,
             },
             {
@@ -440,6 +450,27 @@ function DtDisplay:addToMainMenu(menu_items)
             {
                 text = _("Power & suspend"),
                 sub_item_table = self:getSuspendMenuList(),
+            },
+            {
+                text_func = function()
+                    if self.settings.advanced_settings_enabled then
+                        return _("Advanced settings: ON ✓")
+                    else
+                        return _("Advanced settings: OFF")
+                    end
+                end,
+                checked_func = function()
+                    return self.settings.advanced_settings_enabled == true
+                end,
+                separator = true,
+                callback = function(touchmenu_instance)
+                    self.settings.advanced_settings_enabled = not self.settings.advanced_settings_enabled
+                    self.local_storage:reset(self.settings)
+                    self.local_storage:flush()
+                    if touchmenu_instance then
+                        touchmenu_instance:updateItems()
+                    end
+                end,
             },
         },
     }
@@ -1169,7 +1200,7 @@ function DtDisplay:showDateTimeWidget()
 end
 
 function DtDisplay:onDTDisplayLaunch()
-    UIManager:show(DisplayWidget:new { props = self.settings })
+    UIManager:show(DisplayWidget:new { props = self:getEffectiveProps() })
 end
 
 function DtDisplay:showFontSizeSpinWidget(touchmenu_instance, font_size, callback)
@@ -1243,6 +1274,50 @@ function DtDisplay:showFullRefreshSpinWidget(touchmenu_instance)
             end
         end,
     })
+end
+
+--- Returns self.settings merged with advanced_settings.lua when the toggle is on.
+--- Values in the file win over UI values, but only if they are not nil.
+function DtDisplay:getEffectiveProps()
+    -- When the toggle is off, use UI settings as-is
+    if not self.settings.advanced_settings_enabled then
+        return self.settings
+    end
+
+    local adv_path = PLUGIN_DIR .. "advanced_settings.lua"
+    local ok, adv = pcall(dofile, adv_path)
+
+    -- If the file is missing, empty, or has a syntax error, fall back silently
+    if not ok or type(adv) ~= "table" then
+        return self.settings
+    end
+
+    -- Shallow-clone self.settings so we don't mutate the stored settings
+    local merged = {}
+    for k, v in pairs(self.settings) do
+        if type(v) == "table" then
+            local sub = {}
+            for k2, v2 in pairs(v) do sub[k2] = v2 end
+            merged[k] = sub
+        else
+            merged[k] = v
+        end
+    end
+
+    -- Overlay with values from the file (nil values are skipped → UI wins)
+    for k, v in pairs(adv) do
+        if type(v) == "table" and type(merged[k]) == "table" then
+            for k2, v2 in pairs(v) do
+                if v2 ~= nil then
+                    merged[k][k2] = v2
+                end
+            end
+        elseif v ~= nil then
+            merged[k] = v
+        end
+    end
+
+    return merged
 end
 
 return DtDisplay
