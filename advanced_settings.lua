@@ -23,7 +23,7 @@ return {
     -- custom_rotation values: 0 = portrait, 1 = landscape CW, 2 = portrait inverted, 3 = landscape CCW
     rotation = {
         follow_koreader = true,   -- true or false
-        custom_rotation = 3,   -- 0, 1, 2, or 3
+        custom_rotation = 1,   -- 0, 1, 2, or 3
     },
 
     -- SUSPEND BEHAVIOUR --
@@ -55,7 +55,7 @@ return {
 
     -- WIDGET BRIGHTNESS --
     -- Set to -1 to disable (use device default), or 0–24 (device max may vary)
-    widget_brightness = -1,
+    widget_brightness = 0,
 
     -- FULL REFRESH INTERVAL --
     -- Number of minutes between full e-ink refreshes. Set to 0 to disable.
@@ -76,5 +76,5 @@ return {
 
     -- CLOCK & DISPLAY --
     clock_format = nil,  -- "24", "12", or "follow"
-    night_mode   = "night",  -- "night", "normal", or "follow"
+    night_mode   = "follow",  -- "night", "normal", or "follow"
 }

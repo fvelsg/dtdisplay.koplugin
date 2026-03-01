@@ -33,33 +33,25 @@ local DisplayWidget = InputContainer:extend {
 
 local function getEffectiveNightMode(props)
     local setting = props and props.night_mode or "follow"
-    local koreader_night = G_reader_settings:isTrue("night_mode")
 
-    -- Despite covers_fullscreen = true, KOReader still applies its own screen
-    -- inversion when night mode is on. We must therefore use XOR logic: we only
-    -- need to add an extra invertRect when our *desired* state differs from what
-    -- KOReader is already doing. If they match, no extra inversion is needed.
+    -- Because covers_fullscreen = true, KOReader's own NightModeWidget is
+    -- suppressed beneath us — it never inverts the screen independently.
+    -- We own the inversion entirely, so simple absolute logic is correct:
     --
-    --  desired | koreader | we invert?
-    --  --------|----------|----------
-    --  night   | ON       | false  (KOReader already made it dark — leave it)
-    --  night   | OFF      | true   (KOReader left it light — we darken it)
-    --  normal  | ON       | true   (KOReader made it dark — we undo that)
-    --  normal  | OFF      | false  (KOReader left it light — leave it)
-    --  follow  | ON       | false  (we want dark, KOReader did it — leave it)
-    --  follow  | OFF      | false  (we want light, KOReader left it — leave it)
-
-    local desired_night
+    --   night  → always invert  (always dark, regardless of KOReader state)
+    --   normal → never invert   (always light, regardless of KOReader state)
+    --   follow → mirror KOReader's current night mode setting
+    --
+    -- This is evaluated dynamically on every paintTo() call so that changes
+    -- to KOReader's night mode (for "follow") are always reflected immediately,
+    -- and so that "night"/"normal" truly lock the appearance independently.
     if setting == "night" then
-        desired_night = true
+        return true
     elseif setting == "normal" then
-        desired_night = false
+        return false
     else  -- "follow"
-        desired_night = koreader_night
+        return G_reader_settings:isTrue("night_mode")
     end
-
-    -- Return true only when we need to add an inversion on top of KOReader's.
-    return desired_night ~= koreader_night
 end
 
 
