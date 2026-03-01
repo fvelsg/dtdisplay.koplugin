@@ -35,6 +35,20 @@ local function getEffectiveNightMode(props)
     local setting = props and props.night_mode or "follow"
     local koreader_night = G_reader_settings:isTrue("night_mode")
 
+    -- Despite covers_fullscreen = true, KOReader still applies its own screen
+    -- inversion when night mode is on. We must therefore use XOR logic: we only
+    -- need to add an extra invertRect when our *desired* state differs from what
+    -- KOReader is already doing. If they match, no extra inversion is needed.
+    --
+    --  desired | koreader | we invert?
+    --  --------|----------|----------
+    --  night   | ON       | false  (KOReader already made it dark — leave it)
+    --  night   | OFF      | true   (KOReader left it light — we darken it)
+    --  normal  | ON       | true   (KOReader made it dark — we undo that)
+    --  normal  | OFF      | false  (KOReader left it light — leave it)
+    --  follow  | ON       | false  (we want dark, KOReader did it — leave it)
+    --  follow  | OFF      | false  (we want light, KOReader left it — leave it)
+
     local desired_night
     if setting == "night" then
         desired_night = true
@@ -43,8 +57,8 @@ local function getEffectiveNightMode(props)
     else  -- "follow"
         desired_night = koreader_night
     end
-    -- XOR: if desired == koreader, do nothing (KOReader handles it).
-    --      if desired != koreader, invert to counteract/override it.
+
+    -- Return true only when we need to add an inversion on top of KOReader's.
     return desired_night ~= koreader_night
 end
 
@@ -91,10 +105,12 @@ function DisplayWidget:init()
     self.covers_fullscreen = true
 
 
-    -- Nightmode 
+    -- Nightmode
     -- Night mode: since we cover fullscreen, KOReader's own NightModeWidget
     -- is hidden beneath us. We own the inversion entirely via paintTo.
-    self.apply_night_inversion = getEffectiveNightMode(self.props)
+    -- NOTE: apply_night_inversion is NOT cached here — it is evaluated
+    -- dynamically in paintTo() so that changes to the night mode setting
+    -- (either in KOReader or via props) are always respected immediately.
     self.invert_png_overlay = not (self.props.png_overlay
         and self.props.png_overlay.invert_with_night_mode == false)
 
@@ -159,7 +175,14 @@ function DisplayWidget:refresh()
         end
     end
 
-    UIManager:setDirty("all", "ui", self.datetime_vertical_group.dimen)
+    -- When using custom positions the widgets are scattered across the screen,
+    -- so there is no single bounding box to dirty — refresh the full UI layer.
+    -- In the default centered layout, use the precise group dimensions as before.
+    if self.using_custom_positions then
+        UIManager:setDirty("all", "ui")
+    else
+        UIManager:setDirty("all", "ui", self.datetime_vertical_group.dimen)
+    end
 end
 
 function DisplayWidget:onShow()
@@ -492,10 +515,114 @@ function DisplayWidget:updatePngOverlayWidget()
     end
 end
 
+--- Returns true if any position value is explicitly set in props.positions.
+local function hasCustomPositions(props)
+    local pos = props and props.positions
+    if type(pos) ~= "table" then return false end
+    return pos.date_x ~= nil or pos.date_y ~= nil
+        or pos.time_x ~= nil or pos.time_y ~= nil
+        or pos.status_x ~= nil or pos.status_y ~= nil
+end
+
+--- Build the clock frame using the original centered VerticalGroup layout.
+function DisplayWidget:renderDefaultLayout(screen_size)
+    local total_height = self.time_widget:getSize().h
+                       + self.date_widget:getSize().h
+                       + self.status_widget:getSize().h
+    local spacer_height = (screen_size.h - total_height) / 2
+
+    -- HELP: is there a better way of drawing blank space?
+    local spacer_widget = TextBoxWidget:new {
+        text   = nil,
+        face   = Font:getFace("cfont"),
+        width  = screen_size.w,
+        height = spacer_height,
+    }
+
+    self.datetime_vertical_group = VerticalGroup:new {
+        self.date_widget,
+        self.time_widget,
+        self.status_widget,
+    }
+    local vertical_group = VerticalGroup:new {
+        spacer_widget,
+        self.datetime_vertical_group,
+        spacer_widget,
+    }
+
+    return FrameContainer:new {
+        geom       = Geom:new { w = screen_size.w, h = screen_size.h },  -- FIX: was missing h =
+        radius     = 0,
+        bordersize = 0,
+        padding    = 0,
+        margin     = 0,
+        background = Blitbuffer.COLOUR_WHITE,
+        color      = Blitbuffer.COLOUR_WHITE,
+        width      = screen_size.w,
+        height     = screen_size.h,
+        vertical_group,
+    }
+end
+
+--- Build the clock frame using exact x/y positions from props.positions.
+--- Any field left nil falls back to the default centered position for that widget.
+function DisplayWidget:renderCustomLayout(screen_size)
+    local total_height = self.time_widget:getSize().h
+                       + self.date_widget:getSize().h
+                       + self.status_widget:getSize().h
+    local center_y         = (screen_size.h - total_height) / 2
+    local default_date_y   = center_y
+    local default_time_y   = center_y + self.date_widget:getSize().h
+    local default_status_y = center_y
+                           + self.date_widget:getSize().h
+                           + self.time_widget:getSize().h
+
+    local pos      = self.props.positions or {}
+    local date_x   = pos.date_x   or 0
+    local date_y   = pos.date_y   or default_date_y
+    local time_x   = pos.time_x   or 0
+    local time_y   = pos.time_y   or default_time_y
+    local status_x = pos.status_x or 0
+    local status_y = pos.status_y or default_status_y
+
+    self.date_widget.overlap_offset   = { date_x,   date_y   }
+    self.time_widget.overlap_offset   = { time_x,   time_y   }
+    self.status_widget.overlap_offset = { status_x, status_y }
+
+    -- A full-screen spacer forces FrameContainer to fill the whole screen.
+    local bg_spacer = TextBoxWidget:new {
+        text   = nil,
+        face   = Font:getFace("cfont"),
+        width  = screen_size.w,
+        height = screen_size.h,
+    }
+
+    local background_frame = FrameContainer:new {
+        geom       = Geom:new { w = screen_size.w, h = screen_size.h },
+        radius     = 0,
+        bordersize = 0,
+        padding    = 0,
+        margin     = 0,
+        background = Blitbuffer.COLOUR_WHITE,
+        color      = Blitbuffer.COLOUR_WHITE,
+        width      = screen_size.w,
+        height     = screen_size.h,
+        bg_spacer,
+    }
+
+    return OverlapGroup:new {
+        dimen = Geom:new { w = screen_size.w, h = screen_size.h },
+        background_frame,
+        self.date_widget,
+        self.time_widget,
+        self.status_widget,
+    }
+end
+
 function DisplayWidget:render()
     local screen_size = Screen:getSize()
 
-    -- Insntiate widgets
+    -- Instantiate widgets
     self.time_widget = RenderUtils.renderTimeWidget(
         self.now,
         screen_size.w,
@@ -503,7 +630,7 @@ function DisplayWidget:render()
             self.props.time_widget.font_name,
             self.props.time_widget.font_size
         ),
-        self.props.clock_format  
+        self.props.clock_format
     )
     self.date_widget = RenderUtils.renderDateWidget(
         self.now,
@@ -522,42 +649,15 @@ function DisplayWidget:render()
         )
     )
 
-    -- Compute the widget heights and the amount of spacing we need
-    local total_height = self.time_widget:getSize().h + self.date_widget:getSize().h + self.status_widget:getSize().h
-    local spacer_height = (screen_size.h - total_height) / 2
-
-    -- HELP: is there a better way of drawing blank space?
-    local spacer_widget = TextBoxWidget:new {
-        text = nil,
-        face = Font:getFace("cfont"),
-        width = screen_size.w,
-        height = spacer_height
-    }
-
-    -- Lay out and assemble
-    self.datetime_vertical_group = VerticalGroup:new {
-        self.date_widget,
-        self.time_widget,
-        self.status_widget,
-    }
-    local vertical_group = VerticalGroup:new {
-        spacer_widget,
-        self.datetime_vertical_group,
-        spacer_widget,
-    }
-
-    local clock_frame = FrameContainer:new {
-        geom = Geom:new { w = screen_size.w, screen_size.h },
-        radius = 0,
-        bordersize = 0,
-        padding = 0,
-        margin = 0,
-        background = Blitbuffer.COLOUR_WHITE,
-        color = Blitbuffer.COLOUR_WHITE,
-        width = screen_size.w,
-        height = screen_size.h,
-        vertical_group
-    }
+    -- Choose layout: custom positions (from advanced_settings) or default centered.
+    local clock_frame
+    if hasCustomPositions(self.props) then
+        self.using_custom_positions = true
+        clock_frame = self:renderCustomLayout(screen_size)
+    else
+        self.using_custom_positions = false
+        clock_frame = self:renderDefaultLayout(screen_size)
+    end
 
     -- Reset file list cache when rendering (orientation may have changed)
     self.png_file_list = nil
@@ -579,7 +679,13 @@ function DisplayWidget:render()
 end
 
 function DisplayWidget:paintTo(bb, x, y)
-    if self.apply_night_inversion and self.overlap_group and not self.invert_png_overlay then
+    -- FIX: Evaluate night mode dynamically on every paint instead of using a
+    -- value cached at init() time. This ensures that any change to the night
+    -- mode setting — whether made in the KOReader UI, via the plugin menu, or
+    -- via advanced_settings.lua — is always reflected immediately.
+    local apply_night = getEffectiveNightMode(self.props)
+
+    if apply_night and self.overlap_group and not self.invert_png_overlay then
         -- Paint clock frame, invert it, then paint PNG on top untouched
         self.overlap_group[1]:paintTo(bb, x, y)
         bb:invertRect(x, y, Screen:getWidth(), Screen:getHeight())
@@ -587,7 +693,7 @@ function DisplayWidget:paintTo(bb, x, y)
     else
         -- No PNG, or user wants everything inverted: paint all then invert
         InputContainer.paintTo(self, bb, x, y)
-        if self.apply_night_inversion then
+        if apply_night then
             bb:invertRect(x, y, Screen:getWidth(), Screen:getHeight())
         end
     end

@@ -22,8 +22,8 @@ return {
     -- To use a custom rotation, set follow_koreader = false AND set custom_rotation.
     -- custom_rotation values: 0 = portrait, 1 = landscape CW, 2 = portrait inverted, 3 = landscape CCW
     rotation = {
-        follow_koreader = "false",   -- true or false
-        custom_rotation = 0,   -- 0, 1, 2, or 3
+        follow_koreader = true,   -- true or false
+        custom_rotation = 3,   -- 0, 1, 2, or 3
     },
 
     -- SUSPEND BEHAVIOUR --
@@ -61,9 +61,20 @@ return {
     -- Number of minutes between full e-ink refreshes. Set to 0 to disable.
     full_refresh_minutes = nil,
 
+    -- WIDGET POSITIONS --
+    -- Set the exact x, y pixel position of each element.
+    -- x = pixels from the left edge, y = pixels from the top edge.
+    -- Set a field to nil to use the default centered layout instead.
+    positions = {
+        date_x   = 100,
+        date_y   = 300,
+        time_x   = nil,
+        time_y   = nil,
+        status_x = nil,
+        status_y = nil,
+    },
+
     -- CLOCK & DISPLAY --
     clock_format = nil,  -- "24", "12", or "follow"
-    night_mode   = nil,  -- "night", "normal", or "follow"
-
-
+    night_mode   = "night",  -- "night", "normal", or "follow"
 }
