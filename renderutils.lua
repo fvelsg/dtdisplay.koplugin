@@ -37,4 +37,29 @@ function RenderUtils.renderStatusWidget(width, font_face)
     }
 end
 
+-- renderutils.lua
+function RenderUtils.renderBatteryWidget(font_face)
+    return TextBoxWidget:new {
+        text = StatusUtils.getBatteryText(),
+        face = font_face or Font:getFace("infofont", 24),
+        alignment = "left",
+    }
+end
+
+function RenderUtils.renderWifiWidget(font_face)
+    return TextBoxWidget:new {
+        text = StatusUtils.getWifiStatusText(),
+        face = font_face or Font:getFace("infofont", 24),
+        alignment = "left",
+    }
+end
+
+function RenderUtils.renderMemoryWidget(font_face)
+    return TextBoxWidget:new {
+        text = StatusUtils.getMemoryStatusText(),
+        face = font_face or Font:getFace("infofont", 24),
+        alignment = "left",
+    }
+end
+
 return RenderUtils

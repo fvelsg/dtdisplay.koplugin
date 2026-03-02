@@ -12,6 +12,7 @@ local OverlapGroup = require("ui/widget/overlapgroup")
 local PluginShare = require("pluginshare")
 local Screen = Device.screen
 local TextBoxWidget = require("ui/widget/textboxwidget")
+local TextWidget = require("ui/widget/textwidget") -- Added TextWidget to tightly wrap strings
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 
@@ -27,40 +28,52 @@ local SystemUtils = require("systemutils")
 local T = require("ffi/util").template
 local _ = require("gettext")
 
+--- Helper to deep-merge tables. Overrides base values with override values.
+local function deepMerge(base, override)
+    if type(base) ~= "table" then return override or base end
+    if type(override) ~= "table" then return base end
+    
+    local res = {}
+    for k, v in pairs(base) do
+        if type(v) == "table" then
+            res[k] = deepMerge(v, {}) -- deep copy the table
+        else
+            res[k] = v
+        end
+    end
+    
+    for k, v in pairs(override) do
+        if type(v) == "table" then
+            if type(res[k]) == "table" then
+                res[k] = deepMerge(res[k], v)
+            else
+                res[k] = deepMerge({}, v)
+            end
+        else
+            res[k] = v
+        end
+    end
+    return res
+end
+
 local DisplayWidget = InputContainer:extend {
     props = {},
 }
 
-local function getEffectiveNightMode(props)
-    local setting = props and props.night_mode or "follow"
-
-    -- Because covers_fullscreen = true, KOReader's own NightModeWidget is
-    -- suppressed beneath us — it never inverts the screen independently.
-    -- We own the inversion entirely, so simple absolute logic is correct:
-    --
-    --   night  → always invert  (always dark, regardless of KOReader state)
-    --   normal → never invert   (always light, regardless of KOReader state)
-    --   follow → mirror KOReader's current night mode setting
-    --
-    -- This is evaluated dynamically on every paintTo() call so that changes
-    -- to KOReader's night mode (for "follow") are always reflected immediately,
-    -- and so that "night"/"normal" truly lock the appearance independently.
-    if setting == "night" then
-        return true
-    elseif setting == "normal" then
-        return false
-    else  -- "follow"
-        return G_reader_settings:isTrue("night_mode")
-    end
-end
-
-
 function DisplayWidget:init()
-    -- Properties
+    -- Store incoming settings (UI + advanced_settings.lua) as the base foundation
+    self.base_props = self.props
+    
+    -- Evaluate the current PNG and merge its .lua settings before initial render
+    self:updateActiveProps()
+
     self.now = os.time()
     self.time_widget = nil
     self.date_widget = nil
     self.status_widget = nil
+    self.battery_widget = nil
+    self.wifi_widget = nil
+    self.memory_widget = nil
     self.datetime_vertical_group = nil
 
     -- PNG overlay state
@@ -96,16 +109,6 @@ function DisplayWidget:init()
     -- Hints
     self.covers_fullscreen = true
 
-
-    -- Nightmode
-    -- Night mode: since we cover fullscreen, KOReader's own NightModeWidget
-    -- is hidden beneath us. We own the inversion entirely via paintTo.
-    -- NOTE: apply_night_inversion is NOT cached here — it is evaluated
-    -- dynamically in paintTo() so that changes to the night mode setting
-    -- (either in KOReader or via props) are always respected immediately.
-    self.invert_png_overlay = not (self.props.png_overlay
-        and self.props.png_overlay.invert_with_night_mode == false)
-
     -- Render
     UIManager:setDirty("all", "full") -- return to flashpartial if crashes
     self[1] = self:render()
@@ -134,6 +137,24 @@ function DisplayWidget:init()
     end    
 end
 
+--- Generates the active self.props by merging image.lua (if any) onto base_props.
+function DisplayWidget:updateActiveProps()
+    self.props = deepMerge({}, self.base_props)
+
+    local png_path, _ = self:getCurrentPngPathAndType()
+    if png_path then
+        local lua_path = png_path:gsub("%.png$", ".lua")
+        local f = io.open(lua_path, "r")
+        if f then
+            f:close()
+            local ok, img_props = pcall(dofile, lua_path)
+            if ok and type(img_props) == "table" then
+                self.props = deepMerge(self.props, img_props)
+            end
+        end
+    end
+end
+
 function DisplayWidget:applyClockRotation()
     local rotation_settings = self.props and self.props.rotation
     if rotation_settings and not rotation_settings.follow_koreader then
@@ -152,7 +173,7 @@ end
 function DisplayWidget:refresh()
     self.now = os.time()
     self:update()
-    -- Cycle PNG overlay if in cycle mode
+    
     if type(self.cyclePngOverlay) == "function" then
         self:cyclePngOverlay()
     end
@@ -167,9 +188,6 @@ function DisplayWidget:refresh()
         end
     end
 
-    -- When using custom positions the widgets are scattered across the screen,
-    -- so there is no single bounding box to dirty — refresh the full UI layer.
-    -- In the default centered layout, use the precise group dimensions as before.
     if self.using_custom_positions then
         UIManager:setDirty("all", "ui")
     else
@@ -182,12 +200,9 @@ function DisplayWidget:onShow()
 end
 
 function DisplayWidget:onResume()
-    -- Device woke up from suspend — restart the clock refresh timer
     self.now = os.time()
     self:update()
-    UIManager:setDirty("all", "full") -- return to flash partial if it crashes
-
-    -- Restart the auto-refresh timer
+    UIManager:setDirty("all", "full") 
     UIManager:unschedule(self.autoRefresh)
     self:autoRefresh()
 end
@@ -209,7 +224,6 @@ function DisplayWidget:onTapClose()
         SystemUtils.setBrightness(self.original_brightness)
     end
 
-    -- RESTORE ORIGINAL AUTOSUSPEND
     if self.original_autosuspend_timeout then
         SystemUtils.setAutoSuspend(self.original_autosuspend_timeout)
     end
@@ -219,7 +233,6 @@ end
 DisplayWidget.onAnyKeyPressed = DisplayWidget.onTapClose
 
 function DisplayWidget:onCloseWidget()
-    -- Safety net: ensure rotation and suspend are always restored even if closed externally
     self:restoreRotation()
     if self.original_autosuspend_timeout then
         SystemUtils.setAutoSuspend(self.original_autosuspend_timeout)
@@ -227,109 +240,100 @@ function DisplayWidget:onCloseWidget()
     if self.original_brightness then
         SystemUtils.setBrightness(self.original_brightness)
     end
-
 end
-
 
 function DisplayWidget:update()
     local time_text = TimeUtils.getTimeText(self.now, self.props.clock_format)
     local date_text = TimeUtils.getDateText(self.now, true)
-    local status_text = StatusUtils.getStatusText()
 
-    -- Avoid spamming repeated calls to setText
     if self.time_widget.text ~= time_text then
         self.time_widget:setText(time_text)
     end
     if self.date_widget.text ~= date_text then
         self.date_widget:setText(date_text)
     end
-    if self.status_widget.text ~= status_text then
-        self.status_widget:setText(status_text)
+
+    if self.status_widget then
+        local status_text = StatusUtils.getStatusText()
+        if self.status_widget.text ~= status_text then
+            self.status_widget:setText(status_text)
+        end
+    end
+
+    if self.battery_widget then
+        local bat_text = StatusUtils.getBatteryText()
+        if self.battery_widget.text ~= bat_text then
+            self.battery_widget:setText(bat_text)
+        end
+    end
+
+    if self.wifi_widget then
+        local wifi_text = StatusUtils.getWifiStatusText()
+        if self.wifi_widget.text ~= wifi_text then
+            self.wifi_widget:setText(wifi_text)
+        end
+    end
+
+    if self.memory_widget then
+        local mem_text = StatusUtils.getMemoryStatusText()
+        if self.memory_widget.text ~= mem_text then
+            self.memory_widget:setText(mem_text)
+        end
     end
 end
 
 --- Get the active folder path based on current orientation.
 function DisplayWidget:getActiveFolderPath()
-    local overlay_settings = self.props and self.props.png_overlay
-    if not overlay_settings then
-        return nil
-    end
+    local overlay_settings = self.base_props and self.base_props.png_overlay
+    if not overlay_settings then return nil end
 
     if PngUtils.isPortraitOrientation() then
         local folder = overlay_settings.portrait_folder_path
-        if folder and folder ~= "" then
-            return folder
-        end
+        if folder and folder ~= "" then return folder end
         local legacy = overlay_settings.folder_path
-        if legacy and legacy ~= "" then
-            return legacy
-        end
+        if legacy and legacy ~= "" then return legacy end
     else
         local folder = overlay_settings.landscape_folder_path
-        if folder and folder ~= "" then
-            return folder
-        end
+        if folder and folder ~= "" then return folder end
         local legacy = overlay_settings.folder_path
-        if legacy and legacy ~= "" then
-            return legacy
-        end
+        if legacy and legacy ~= "" then return legacy end
     end
-
     return nil
 end
 
 --- Get the active single file path based on current orientation.
 function DisplayWidget:getActiveSingleFilePath()
-    local overlay_settings = self.props and self.props.png_overlay
-    if not overlay_settings then
-        return nil
-    end
+    local overlay_settings = self.base_props and self.base_props.png_overlay
+    if not overlay_settings then return nil end
 
     if PngUtils.isPortraitOrientation() then
         local fpath = overlay_settings.single_file_path_portrait
-        if fpath and fpath ~= "" then
-            return fpath
-        end
+        if fpath and fpath ~= "" then return fpath end
         local legacy = overlay_settings.single_file_path
-        if legacy and legacy ~= "" then
-            return legacy
-        end
+        if legacy and legacy ~= "" then return legacy end
     else
         local fpath = overlay_settings.single_file_path_landscape
-        if fpath and fpath ~= "" then
-            return fpath
-        end
+        if fpath and fpath ~= "" then return fpath end
         local legacy = overlay_settings.single_file_path
-        if legacy and legacy ~= "" then
-            return legacy
-        end
+        if legacy and legacy ~= "" then return legacy end
     end
-
     return nil
 end
 
 --- Get sorted list of valid PNG files from the active folder.
 function DisplayWidget:getPngFileList()
-    if self.png_file_list then
-        return self.png_file_list
-    end
+    if self.png_file_list then return self.png_file_list end
 
-    local overlay_settings = self.props and self.props.png_overlay
-    if not overlay_settings or not overlay_settings.enabled then
-        return nil
-    end
+    local overlay_settings = self.base_props and self.base_props.png_overlay
+    if not overlay_settings or not overlay_settings.enabled then return nil end
 
     local folder = self:getActiveFolderPath()
-    if not folder then
-        return nil
-    end
+    if not folder then return nil end
 
     local lfs = require("libs/libkoreader-lfs")
     local files = {}
     local ok, iter, dir_obj = pcall(lfs.dir, folder)
-    if not ok then
-        return nil
-    end
+    if not ok then return nil end
 
     for entry in iter, dir_obj do
         if entry ~= "." and entry ~= ".." then
@@ -339,10 +343,8 @@ function DisplayWidget:getPngFileList()
             end
         end
     end
-
     table.sort(files)
 
-    -- Filter by resolution
     local valid_files = {}
     for _, fname in ipairs(files) do
         local fpath = folder .. "/" .. fname
@@ -352,20 +354,15 @@ function DisplayWidget:getPngFileList()
         end
     end
 
-    if #valid_files == 0 then
-        return nil
-    end
-
+    if #valid_files == 0 then return nil end
     self.png_file_list = valid_files
     return self.png_file_list
 end
 
 --- Get the current PNG file path and its resolution type.
 function DisplayWidget:getCurrentPngPathAndType()
-    local overlay_settings = self.props and self.props.png_overlay
-    if not overlay_settings or not overlay_settings.enabled then
-        return nil, nil
-    end
+    local overlay_settings = self.base_props and self.base_props.png_overlay
+    if not overlay_settings or not overlay_settings.enabled then return nil, nil end
 
     local mode = overlay_settings.mode or "single"
 
@@ -373,33 +370,24 @@ function DisplayWidget:getCurrentPngPathAndType()
         local single_path = self:getActiveSingleFilePath()
         if single_path then
             local res_type = PngUtils.checkPngResolution(single_path)
-            if res_type then
-                return single_path, res_type
-            end
+            if res_type then return single_path, res_type end
         end
         return nil, nil
     elseif mode == "cycle" then
         local files = self:getPngFileList()
-        if not files or #files == 0 then
-            return nil, nil
-        end
+        if not files or #files == 0 then return nil, nil end
         local folder = self:getActiveFolderPath()
-        if not folder then
-            return nil, nil
-        end
-        if self.png_cycle_index > #files then
-            self.png_cycle_index = 1
-        end
+        if not folder then return nil, nil end
+        if self.png_cycle_index > #files then self.png_cycle_index = 1 end
         local entry = files[self.png_cycle_index]
         return folder .. "/" .. entry.filename, entry.resolution_type
     end
-
     return nil, nil
 end
 
 --- Get the configured cycle interval in minutes
 function DisplayWidget:getCycleMinutes()
-    local overlay_settings = self.props and self.props.png_overlay
+    local overlay_settings = self.base_props and self.base_props.png_overlay
     if overlay_settings and overlay_settings.cycle_minutes then
         return overlay_settings.cycle_minutes
     end
@@ -408,27 +396,21 @@ end
 
 --- Check if full refresh on cycle is enabled
 function DisplayWidget:isFullRefreshOnCycle()
-    local overlay_settings = self.props and self.props.png_overlay
+    local overlay_settings = self.base_props and self.base_props.png_overlay
     if overlay_settings then
         return overlay_settings.full_refresh_on_cycle == true
     end
     return false
 end
 
---- Cycle to the next PNG image based on configured interval.
+--- Cycle to the next PNG image, update active props, and rebuild layout
 function DisplayWidget:cyclePngOverlay()
-    local overlay_settings = self.props and self.props.png_overlay
-    if not overlay_settings or not overlay_settings.enabled then
-        return
-    end
-    if overlay_settings.mode ~= "cycle" then
-        return
-    end
+    local overlay_settings = self.base_props and self.base_props.png_overlay
+    if not overlay_settings or not overlay_settings.enabled then return end
+    if overlay_settings.mode ~= "cycle" then return end
 
     local files = self:getPngFileList()
-    if not files or #files == 0 then
-        return
-    end
+    if not files or #files == 0 then return end
 
     self.png_cycle_counter = self.png_cycle_counter + 1
     local cycle_minutes = self:getCycleMinutes()
@@ -440,8 +422,15 @@ function DisplayWidget:cyclePngOverlay()
             self.png_cycle_index = 1
         end
 
-        -- Update the overlay widget with the new image
-        self:updatePngOverlayWidget()
+        -- Image has changed: Evaluate specific settings and rebuild layout
+        self:updateActiveProps()
+        
+        if self[1] and self[1].free then
+            self[1]:free()
+        end
+        
+        self[1] = self:render()
+        self:update() -- Ensure text inside new widgets is correct instantly
 
         local refresh_mode = "ui"
         if self:isFullRefreshOnCycle() then
@@ -454,15 +443,13 @@ end
 --- Create the PNG overlay ImageWidget with proper rotation handling.
 function DisplayWidget:createPngOverlayWidget()
     local png_path, res_type = self:getCurrentPngPathAndType()
-    if not png_path then
-        return nil
-    end
+    if not png_path then return nil end
 
     local ImageWidget = require("ui/widget/imagewidget")
     local screen_size = Screen:getSize()
     local rotation_angle = PngUtils.getImageRotationAngle(res_type)
 
-    local widget = ImageWidget:new {
+    return ImageWidget:new {
         file = png_path,
         width = screen_size.w,
         height = screen_size.h,
@@ -470,60 +457,53 @@ function DisplayWidget:createPngOverlayWidget()
         alpha = true,
         rotation_angle = rotation_angle,
     }
-
-    return widget
 end
 
---- Update the overlay widget in-place for cycling.
-function DisplayWidget:updatePngOverlayWidget()
-    local png_path, res_type = self:getCurrentPngPathAndType()
-    if not png_path then
-        return
-    end
-
-    if self.png_overlay_widget and self.overlap_group then
-        local ImageWidget = require("ui/widget/imagewidget")
-        local screen_size = Screen:getSize()
-        local rotation_angle = PngUtils.getImageRotationAngle(res_type)
-
-        -- Free old image resources
-        if self.png_overlay_widget.free then
-            self.png_overlay_widget:free()
-        end
-
-        local new_widget = ImageWidget:new {
-            file = png_path,
-            width = screen_size.w,
-            height = screen_size.h,
-            scale_factor = 0,
-            alpha = true,
-            rotation_angle = rotation_angle,
-        }
-
-        self.png_overlay_widget = new_widget
-        if self.overlap_group and #self.overlap_group >= 2 then
-            self.overlap_group[2] = new_widget
-        end
-    end
-end
-
---- Returns true if any position value is explicitly set in props.positions.
+--- Returns true if any position value is explicitly set in props.positions
+--- or if any standalone status widgets are shown (which require custom positioning)
 local function hasCustomPositions(props)
-    local pos = props and props.positions
-    if type(pos) ~= "table" then return false end
-    return pos.date_x ~= nil or pos.date_y ~= nil
-        or pos.time_x ~= nil or pos.time_y ~= nil
-        or pos.status_x ~= nil or pos.status_y ~= nil
+    if not props then return false end
+    
+    local pos = props.positions
+    if type(pos) == "table" then
+        if pos.date_x ~= nil or pos.date_y ~= nil
+            or pos.time_x ~= nil or pos.time_y ~= nil
+            or pos.status_x ~= nil or pos.status_y ~= nil then
+            return true
+        end
+    end
+
+    if props.battery_widget and props.battery_widget.show then return true end
+    if props.wifi_widget and props.wifi_widget.show then return true end
+    if props.memory_widget and props.memory_widget.show then return true end
+
+    return false
 end
 
 --- Build the clock frame using the original centered VerticalGroup layout.
 function DisplayWidget:renderDefaultLayout(screen_size)
-    local total_height = self.time_widget:getSize().h
-                       + self.date_widget:getSize().h
-                       + self.status_widget:getSize().h
+    local total_height = self.time_widget:getSize().h + self.date_widget:getSize().h
+    local items = { self.date_widget, self.time_widget }
+
+    if self.status_widget then
+        total_height = total_height + self.status_widget:getSize().h
+        table.insert(items, self.status_widget)
+    end
+    if self.battery_widget then
+        total_height = total_height + self.battery_widget:getSize().h
+        table.insert(items, self.battery_widget)
+    end
+    if self.wifi_widget then
+        total_height = total_height + self.wifi_widget:getSize().h
+        table.insert(items, self.wifi_widget)
+    end
+    if self.memory_widget then
+        total_height = total_height + self.memory_widget:getSize().h
+        table.insert(items, self.memory_widget)
+    end
+
     local spacer_height = (screen_size.h - total_height) / 2
 
-    -- HELP: is there a better way of drawing blank space?
     local spacer_widget = TextBoxWidget:new {
         text   = nil,
         face   = Font:getFace("cfont"),
@@ -531,11 +511,8 @@ function DisplayWidget:renderDefaultLayout(screen_size)
         height = spacer_height,
     }
 
-    self.datetime_vertical_group = VerticalGroup:new {
-        self.date_widget,
-        self.time_widget,
-        self.status_widget,
-    }
+    self.datetime_vertical_group = VerticalGroup:new(items)
+    
     local vertical_group = VerticalGroup:new {
         spacer_widget,
         self.datetime_vertical_group,
@@ -543,7 +520,7 @@ function DisplayWidget:renderDefaultLayout(screen_size)
     }
 
     return FrameContainer:new {
-        geom       = Geom:new { w = screen_size.w, h = screen_size.h },  -- FIX: was missing h =
+        geom       = Geom:new { w = screen_size.w, h = screen_size.h },
         radius     = 0,
         bordersize = 0,
         padding    = 0,
@@ -556,32 +533,28 @@ function DisplayWidget:renderDefaultLayout(screen_size)
     }
 end
 
---- Build the clock frame using exact x/y positions from props.positions.
---- Any field left nil falls back to the default centered position for that widget.
+--- Build the clock frame using exact x/y positions from props.positions and individual widgets.
 function DisplayWidget:renderCustomLayout(screen_size)
-    local total_height = self.time_widget:getSize().h
-                       + self.date_widget:getSize().h
-                       + self.status_widget:getSize().h
+    local total_height = self.time_widget:getSize().h + self.date_widget:getSize().h
+                       
+    if self.status_widget then
+        total_height = total_height + self.status_widget:getSize().h
+    end
+
     local center_y         = (screen_size.h - total_height) / 2
     local default_date_y   = center_y
     local default_time_y   = center_y + self.date_widget:getSize().h
-    local default_status_y = center_y
-                           + self.date_widget:getSize().h
-                           + self.time_widget:getSize().h
+    local default_status_y = center_y + self.date_widget:getSize().h + self.time_widget:getSize().h
 
     local pos      = self.props.positions or {}
     local date_x   = pos.date_x   or 0
     local date_y   = pos.date_y   or default_date_y
     local time_x   = pos.time_x   or 0
     local time_y   = pos.time_y   or default_time_y
-    local status_x = pos.status_x or 0
-    local status_y = pos.status_y or default_status_y
 
     self.date_widget.overlap_offset   = { date_x,   date_y   }
     self.time_widget.overlap_offset   = { time_x,   time_y   }
-    self.status_widget.overlap_offset = { status_x, status_y }
 
-    -- A full-screen spacer forces FrameContainer to fill the whole screen.
     local bg_spacer = TextBoxWidget:new {
         text   = nil,
         face   = Font:getFace("cfont"),
@@ -602,13 +575,37 @@ function DisplayWidget:renderCustomLayout(screen_size)
         bg_spacer,
     }
 
-    return OverlapGroup:new {
+    local overlap_items = {
         dimen = Geom:new { w = screen_size.w, h = screen_size.h },
         background_frame,
         self.date_widget,
         self.time_widget,
-        self.status_widget,
     }
+
+    if self.status_widget then
+        local status_x = pos.status_x or 0
+        local status_y = pos.status_y or default_status_y
+        self.status_widget.overlap_offset = { status_x, status_y }
+        table.insert(overlap_items, self.status_widget)
+    end
+
+    if self.battery_widget then
+        local bw = self.props.battery_widget
+        self.battery_widget.overlap_offset = { bw.x or 0, bw.y or 0 }
+        table.insert(overlap_items, self.battery_widget)
+    end
+    if self.wifi_widget then
+        local ww = self.props.wifi_widget
+        self.wifi_widget.overlap_offset = { ww.x or 0, ww.y or 0 }
+        table.insert(overlap_items, self.wifi_widget)
+    end
+    if self.memory_widget then
+        local mw = self.props.memory_widget
+        self.memory_widget.overlap_offset = { mw.x or 0, mw.y or 0 }
+        table.insert(overlap_items, self.memory_widget)
+    end
+
+    return OverlapGroup:new(overlap_items)
 end
 
 function DisplayWidget:render()
@@ -618,30 +615,54 @@ function DisplayWidget:render()
     self.time_widget = RenderUtils.renderTimeWidget(
         self.now,
         screen_size.w,
-        Font:getFace(
-            self.props.time_widget.font_name,
-            self.props.time_widget.font_size
-        ),
+        Font:getFace(self.props.time_widget.font_name, self.props.time_widget.font_size),
         self.props.clock_format
     )
     self.date_widget = RenderUtils.renderDateWidget(
         self.now,
         screen_size.w,
-        Font:getFace(
-            self.props.date_widget.font_name,
-            self.props.date_widget.font_size
-        ),
+        Font:getFace(self.props.date_widget.font_name, self.props.date_widget.font_size),
         true
     )
-    self.status_widget = RenderUtils.renderStatusWidget(
-        screen_size.w,
-        Font:getFace(
-            self.props.status_widget.font_name,
-            self.props.status_widget.font_size
+    
+    if not self.props.status_widget or self.props.status_widget.show ~= false then
+        self.status_widget = RenderUtils.renderStatusWidget(
+            screen_size.w,
+            Font:getFace(self.props.status_widget and self.props.status_widget.font_name, self.props.status_widget and self.props.status_widget.font_size)
         )
-    )
+    else
+        self.status_widget = nil
+    end
 
-    -- Choose layout: custom positions (from advanced_settings) or default centered.
+    -- CHANGED: Use TextWidget instead of TextBoxWidget to wrap the text tightly
+    -- without drawing an invisible background box that defaults to screen width.
+    if self.props.battery_widget and self.props.battery_widget.show then
+        self.battery_widget = TextWidget:new {
+            text = StatusUtils.getBatteryText(),
+            face = Font:getFace(self.props.battery_widget.font_name, self.props.battery_widget.font_size)
+        }
+    else
+        self.battery_widget = nil
+    end
+
+    if self.props.wifi_widget and self.props.wifi_widget.show then
+        self.wifi_widget = TextWidget:new {
+            text = StatusUtils.getWifiStatusText(),
+            face = Font:getFace(self.props.wifi_widget.font_name, self.props.wifi_widget.font_size)
+        }
+    else
+        self.wifi_widget = nil
+    end
+
+    if self.props.memory_widget and self.props.memory_widget.show then
+        self.memory_widget = TextWidget:new {
+            text = StatusUtils.getMemoryStatusText(),
+            face = Font:getFace(self.props.memory_widget.font_name, self.props.memory_widget.font_size)
+        }
+    else
+        self.memory_widget = nil
+    end
+
     local clock_frame
     if hasCustomPositions(self.props) then
         self.using_custom_positions = true
@@ -651,10 +672,8 @@ function DisplayWidget:render()
         clock_frame = self:renderDefaultLayout(screen_size)
     end
 
-    -- Reset file list cache when rendering (orientation may have changed)
     self.png_file_list = nil
 
-    -- Build PNG overlay if enabled
     self.png_overlay_widget = self:createPngOverlayWidget()
 
     if self.png_overlay_widget then
@@ -671,21 +690,52 @@ function DisplayWidget:render()
 end
 
 function DisplayWidget:paintTo(bb, x, y)
-    -- FIX: Evaluate night mode dynamically on every paint instead of using a
-    -- value cached at init() time. This ensures that any change to the night
-    -- mode setting — whether made in the KOReader UI, via the plugin menu, or
-    -- via advanced_settings.lua — is always reflected immediately.
-    local apply_night = getEffectiveNightMode(self.props)
+    -- Determine global KOReader state
+    local global_night = G_reader_settings:isTrue("night_mode")
+    
+    -- Determine what state we want based on our settings
+    local setting = self.props and self.props.night_mode or "follow"
+    local want_night = global_night
+    if setting == "night" then 
+        want_night = true
+    elseif setting == "normal" then 
+        want_night = false 
+    end
 
-    if apply_night and self.overlap_group and not self.invert_png_overlay then
-        -- Paint clock frame, invert it, then paint PNG on top untouched
-        self.overlap_group[1]:paintTo(bb, x, y)
-        bb:invertRect(x, y, Screen:getWidth(), Screen:getHeight())
-        self.overlap_group[2]:paintTo(bb, x, y)
+    -- Determine if the PNG should be inverted IN night mode
+    local want_png_inverted = false
+    if want_night then
+        -- Default is false unless explicitly set to true
+        local inv_setting = self.props and self.props.png_overlay and self.props.png_overlay.invert_with_night_mode
+        if inv_setting == true then
+            want_png_inverted = true
+        end
+    end
+
+    -- Since we set `self.covers_fullscreen = true`, KOReader culls the 
+    -- global NightModeWidget. We are 100% responsible for inverting the screen 
+    -- if we want a dark mode appearance. No external inversion will happen.
+
+    if self.overlap_group then
+        if want_night and not want_png_inverted then
+            -- 1. Base is dark, PNG is normal
+            self.overlap_group[1]:paintTo(bb, x, y)
+            bb:invertRect(x, y, Screen:getWidth(), Screen:getHeight())
+            self.overlap_group[2]:paintTo(bb, x, y)
+        elseif want_night and want_png_inverted then
+            -- 2. Base is dark, PNG is inverted
+            self.overlap_group[1]:paintTo(bb, x, y)
+            self.overlap_group[2]:paintTo(bb, x, y)
+            bb:invertRect(x, y, Screen:getWidth(), Screen:getHeight())
+        else
+            -- 3. Day mode (nothing inverted)
+            self.overlap_group[1]:paintTo(bb, x, y)
+            self.overlap_group[2]:paintTo(bb, x, y)
+        end
     else
-        -- No PNG, or user wants everything inverted: paint all then invert
+        -- No PNG overlay
         InputContainer.paintTo(self, bb, x, y)
-        if apply_night then
+        if want_night then
             bb:invertRect(x, y, Screen:getWidth(), Screen:getHeight())
         end
     end

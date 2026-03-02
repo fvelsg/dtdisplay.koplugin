@@ -22,8 +22,8 @@ return {
     -- To use a custom rotation, set follow_koreader = false AND set custom_rotation.
     -- custom_rotation values: 0 = portrait, 1 = landscape CW, 2 = portrait inverted, 3 = landscape CCW
     rotation = {
-        follow_koreader = true,   -- true or false
-        custom_rotation = 1,   -- 0, 1, 2, or 3
+        follow_koreader =false,   -- true or false
+        custom_rotation = 0,   -- 0, 1, 2, or 3
     },
 
     -- SUSPEND BEHAVIOUR --
@@ -55,53 +55,15 @@ return {
 
     -- WIDGET BRIGHTNESS --
     -- Set to -1 to disable (use device default), or 0–24 (device max may vary)
-    widget_brightness = 0,
+    widget_brightness = -1,
 
     -- FULL REFRESH INTERVAL --
     -- Number of minutes between full e-ink refreshes. Set to 0 to disable.
     full_refresh_minutes = nil,
 
-    -- WIDGET POSITIONS --
-    -- Set the exact x, y pixel position of each element.
-    -- x = pixels from the left edge, y = pixels from the top edge.
-    -- Set a field to nil to use the default centered layout instead.
-    positions = {
-        date_x   = nil,
-        date_y   = nil,
-        time_x   = nil,
-        time_y   = nil,
-        status_x = nil,
-        status_y = nil,
-    },
-
-    
-    status_widget = {
-        show = false,      -- Set to false to hide the combined status bar
-        font_size = nil,
-        font_name = nil,
-    },
-
-    -- NEW: Individual status elements
-    battery_widget = {
-        show = true,     -- Set to true to enable standalone battery display
-        font_size = 24,
-        x = 300,           -- Custom X position
-        y = 300,           -- Custom Y position
-    },
-    wifi_widget = {
-        show = true,
-        font_size = 24,
-        x = 50,
-        y = 150,
-    },
-    memory_widget = {
-        show = true,
-        font_size = 24,
-        x = 50,
-        y = 200,
-    },
-
     -- CLOCK & DISPLAY --
     clock_format = nil,  -- "24", "12", or "follow"
-    night_mode   = "follow",  -- "night", "normal", or "follow"
+    night_mode   = nil,  -- "night", "normal", or "follow"
+
+
 }
