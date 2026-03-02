@@ -1,5 +1,31 @@
 # dtdisplay.koplugin (Fork)
+Testing features UI:
+- [ ] Clock settins (format, orientation)
+- [ ] appearance
+	- [ ] Time font (size and style)
+ 	- [ ] Date font (size and style)
+  	- [ ] Date format
+  	- [ ] Status line font (size and style)
+  	- [ ] Widget brightness
+  	- [ ] Night mode
+  	- [ ] Image overlay
+  		- [ ] enable PNG overlay
+  	 	- [ ] Portrait and landscape folders and files
+  	  	- [ ] Use single image or Cycle
+  	  	- [ ] Cycle through images interval
+  	  	- [ ] Full screen refresh on image change
+  	  	- [ ] Invert Image in night mode
+- [ ] Full refresh interval
+- [ ] Power & Suspend
+  	- [ ] Never suspend
+   	- [ ] Use custom suspend time out
 
+- [ ] Advanced Settings (default)
+- [ ] Advanced PNG overlay Settings 
+
+
+
+	 
 A [koreader][1] plugin to display the time and day in a fullscreen widget with images allowed and some other functionalities.
 
 ## Motivation
