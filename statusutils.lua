@@ -6,13 +6,13 @@ local NetworkMgr = require("ui/network/manager")
 
 local StatusUtils = {}
 
-function StatusUtils.getBatteryText()
+function StatusUtils.getBatteryText(format)
     if Device:hasBattery() then
         local powerd = Device:getPowerDevice()
         local battery_level = powerd:getCapacity()
+        local prefix = ""
 
         -- getBatterySymbol was added in a later KOReader build; guard for older installs
-        local prefix = ""
         if type(powerd.getBatterySymbol) == "function" then
             prefix = powerd:getBatterySymbol(
                 powerd:isCharged(),
@@ -21,7 +21,18 @@ function StatusUtils.getBatteryText()
             )
         end
 
-        return T(_("%1 %2 %"), prefix, battery_level)
+        if format == "icon" then
+            return prefix
+        elseif format == "percent" then
+            return T(_("%1 %"), battery_level)
+        else -- "both" or default
+            -- Handle cases where prefix might be empty on older devices
+            if prefix == "" then
+                return T(_("%1 %"), battery_level)
+            else
+                return T(_("%1 %2 %"), prefix, battery_level)
+            end
+        end
     end
 
     return ""

@@ -22,7 +22,7 @@ return {
     -- To use a custom rotation, set follow_koreader = false AND set custom_rotation.
     -- custom_rotation values: 0 = portrait, 1 = landscape CW, 2 = portrait inverted, 3 = landscape CCW
     rotation = {
-        follow_koreader = false,   -- true or false
+        follow_koreader = true,   -- true or false
         custom_rotation = 3,   -- 0, 1, 2, or 3
     },
 
@@ -51,6 +51,9 @@ return {
         cycle_minutes          = nil,  -- how often to cycle to the next image
         full_refresh_on_cycle  = nil,  -- true = full e-ink refresh on each cycle
         invert_with_night_mode = nil,  -- false = keep PNG uninverted when night mode is on
+    },
+    battery_widget = {
+        format = "icon", -- Try "icon" or "both" or "percent"
     },
 
     -- WIDGET BRIGHTNESS --

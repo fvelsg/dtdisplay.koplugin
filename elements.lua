@@ -61,5 +61,25 @@ return {
         z       = 2,
         visible = true,
     },
-
+    wifi    = {
+        x = -150,
+        y = 20,
+        unit = "%",
+        z = 2,
+        visible = false,
+    },
+    battery = {
+        x = 0,
+        y = -45,
+        unit = "%",
+        z = 2,
+        visible = true,
+    },
+    memory  = {
+        x = 150,
+        y = 20,
+        unit = "%",
+        z = 2,
+        visible = false,
+    },
 }

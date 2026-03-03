@@ -40,4 +40,36 @@ function RenderUtils.renderStatusWidget(width, font_face)
     }
 end
 
+function RenderUtils.renderWifiWidget(width, font_face)
+    return TextBoxWidget:new {
+        text = StatusUtils.getWifiStatusText(),
+        face = font_face or Font:getFace("infofont", 24),
+        width = width or Screen:getWidth(),
+        alignment = "center",
+        transparent = true,
+    }
+end
+
+function RenderUtils.renderBatteryWidget(width, font_face, format)
+    return TextBoxWidget:new {
+        text = StatusUtils.getBatteryText(format),
+        face = font_face or Font:getFace("infofont", 24),
+        width = width or Screen:getWidth(),
+        alignment = "center",
+        transparent = true,
+    }
+end
+
+function RenderUtils.renderMemoryWidget(width, font_face)
+    return TextBoxWidget:new {
+        text = StatusUtils.getMemoryStatusText() or "",
+        face = font_face or Font:getFace("infofont", 24),
+        width = width or Screen:getWidth(),
+        alignment = "center",
+        transparent = true,
+    }
+end
+
+
+
 return RenderUtils
