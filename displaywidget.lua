@@ -21,6 +21,16 @@ local T = require("ffi/util").template
 local _ = require("gettext")
 
 
+-- Helper to safely clone base settings so image configs don't permanently overwrite them
+local function deep_copy(obj)
+    if type(obj) ~= 'table' then return obj end
+    local res = {}
+    for k, v in pairs(obj) do res[k] = deep_copy(v) end
+    return res
+end
+
+
+
 local function makeTransparent(widget)
     widget.paintTo = function(self, bb, x, y)
         self.dimen.x, self.dimen.y = x, y
@@ -197,10 +207,10 @@ function DisplayWidget:init()
     self.now              = os.time()
     self.is_closing       = false
     self.render_list      = {}
-    self.time_widget      = nil
-    self.date_widget      = nil
-    self.status_widget    = nil
-    self.png_overlay_widget = nil
+    
+    -- Store original props as the baseline
+    self.base_props = deep_copy(self.props)
+    self._using_custom_config = false
 
     self.png_cycle_index      = 1
     self.png_cycle_counter    = 0
@@ -231,32 +241,19 @@ function DisplayWidget:init()
             },
         }
     }
-
     self.covers_fullscreen = true
 
-    -- Initialize state flags
-    local is_dark = isDisplayInverted(self.props)
-    local system_night = G_reader_settings:isTrue("night_mode")
-    
-    -- We only manually invert if we want a dark screen but the system is in light mode
-    self.apply_manual_inversion = (is_dark == true and system_night == false)
-    
-    -- Should the PNG be inverted? Defaults to true unless explicitly false
-    self.invert_png_overlay = true
-    if self.props.png_overlay and self.props.png_overlay.invert_with_night_mode == false then
-        self.invert_png_overlay = false
-    end
-
+    -- Load the baseline elements.lua
     local elements_path = self.plugin_dir .. "elements.lua"
     local ok, file_elements = pcall(dofile, elements_path)
     if not ok or type(file_elements) ~= "table" then
         file_elements = {}
     end
 
-    self.elements = {}
+    self.base_elements = {}
     for name, defaults in pairs(DEFAULT_ELEMENTS) do
         local user = file_elements[name] or {}
-        self.elements[name] = {
+        self.base_elements[name] = {
             x       = user.x ~= nil and user.x or defaults.x,
             y       = user.y ~= nil and user.y or defaults.y,
             unit    = user.unit or defaults.unit,
@@ -265,10 +262,13 @@ function DisplayWidget:init()
         }
     end
 
+    -- Dynamically load image config (if any) and sync night mode
+    self._using_custom_config = self:applyImageProps()
+    self:syncStateFlags()
+
     self:render()
     UIManager:setDirty("all", "full")
 
-    -- Suspend and Brightness logic remains the same...
     local autosuspend = PluginShare.live_autosuspend
     if autosuspend then
         self.original_autosuspend_timeout = autosuspend.auto_suspend_timeout_seconds
@@ -361,6 +361,142 @@ function DisplayWidget:render()
     end
 
     table.sort(self.render_list, function(a, b) return a.z < b.z end)
+end
+
+function DisplayWidget:render()
+    local sw = Screen:getWidth()
+    local sh = Screen:getHeight()
+
+    -- Robust helper: Checks advanced_settings first, then falls back to status default
+    local function getFont(widget_name)
+        local w_props = self.props[widget_name] or {}
+        local name = w_props.font_name or self.props.status_widget.font_name
+        local size = w_props.font_size or self.props.status_widget.font_size
+        return Font:getFace(name, size)
+    end
+
+    self.time_widget = makeTransparent(RenderUtils.renderTimeWidget(
+        self.now, sw,
+        Font:getFace(self.props.time_widget.font_name, self.props.time_widget.font_size),
+        self.props.clock_format
+    ))
+    self.date_widget = makeTransparent(RenderUtils.renderDateWidget(
+        self.now, sw,
+        Font:getFace(self.props.date_widget.font_name, self.props.date_widget.font_size),
+        true
+    ))
+    self.status_widget = makeTransparent(RenderUtils.renderStatusWidget(
+        sw,
+        Font:getFace(self.props.status_widget.font_name, self.props.status_widget.font_size)
+    ))
+
+    -- Initialize new individual widgets with separate font control
+    self.wifi_widget    = makeTransparent(RenderUtils.renderWifiWidget(sw, getFont("wifi_widget")))
+    self.memory_widget  = makeTransparent(RenderUtils.renderMemoryWidget(sw, getFont("memory_widget")))
+    
+    local batt_props  = self.props.battery_widget or {}
+    local batt_format = batt_props.format or "both"
+    self.battery_widget = makeTransparent(RenderUtils.renderBatteryWidget(sw, getFont("battery_widget"), batt_format))
+
+    self.png_file_list      = nil
+    self.png_overlay_widget = self:createPngOverlayWidget()
+
+    self.render_list = {}
+
+    local function addWidget(name, widget)
+        local elem = self.elements[name]
+        if not elem or not elem.visible then return end
+        local size = widget:getSize()
+        table.insert(self.render_list, {
+            widget = widget,
+            px     = toAbsolute(elem.x, sw, size.w, elem.unit),
+            py     = toAbsolute(elem.y, sh, size.h, elem.unit),
+            z      = elem.z,
+            is_png = false,
+        })
+    end
+
+    addWidget("time",    self.time_widget)
+    addWidget("date",    self.date_widget)
+    addWidget("status",  self.status_widget)
+    addWidget("wifi",    self.wifi_widget)
+    addWidget("battery", self.battery_widget)
+    addWidget("memory",  self.memory_widget)
+
+    local png_elem = self.elements["png"]
+    if self.png_overlay_widget and png_elem and png_elem.visible then
+        table.insert(self.render_list, {
+            widget = self.png_overlay_widget,
+            px     = toAbsolute(png_elem.x, sw, sw, png_elem.unit),
+            py     = toAbsolute(png_elem.y, sh, sh, png_elem.unit),
+            z      = png_elem.z,
+            is_png = true,
+        })
+    end
+
+    table.sort(self.render_list, function(a, b) return a.z < b.z end)
+end
+
+function DisplayWidget:syncStateFlags()
+    local is_dark = isDisplayInverted(self.props)
+    local system_night = G_reader_settings:isTrue("night_mode")
+    
+    self.apply_manual_inversion = (is_dark == true and system_night == false)
+    
+    self.invert_png_overlay = true
+    if self.props.png_overlay and self.props.png_overlay.invert_with_night_mode == false then
+        self.invert_png_overlay = false
+    end
+end
+
+function DisplayWidget:applyImageProps()
+    -- Always reset to the baseline UI/Advanced settings first
+    self.props = deep_copy(self.base_props)
+    self.elements = deep_copy(self.base_elements)
+
+    -- Abort if the feature is turned off in the UI
+    if not self.props.png_overlay or not self.props.png_overlay.use_image_config then
+        return false 
+    end
+
+    local png_path = self:getCurrentPngPathAndType()
+    if not png_path then return false end
+
+    -- Convert /path/to/image.png -> /path/to/image.lua (handles .PNG or .png)
+    local config_path = png_path:gsub("%.[pP][nN][gG]$", ".lua")
+    
+    local ok, img_cfg = pcall(dofile, config_path)
+    if not ok or type(img_cfg) ~= "table" then
+        return false -- File doesn't exist or has syntax errors
+    end
+
+    -- Merge custom standard properties
+    for k, v in pairs(img_cfg) do
+        if k ~= "elements" then 
+            if type(v) == "table" and type(self.props[k]) == "table" then
+                for k2, v2 in pairs(v) do
+                    if v2 ~= nil then self.props[k][k2] = v2 end
+                end
+            elseif v ~= nil then
+                self.props[k] = v
+            end
+        end
+    end
+
+    -- Merge custom positioning/layout elements
+    if img_cfg.elements then
+        for name, user in pairs(img_cfg.elements) do
+            if self.elements[name] then
+                if user.x ~= nil then self.elements[name].x = user.x end
+                if user.y ~= nil then self.elements[name].y = user.y end
+                if user.unit ~= nil then self.elements[name].unit = user.unit end
+                if user.z ~= nil then self.elements[name].z = user.z end
+                if user.visible ~= nil then self.elements[name].visible = user.visible end
+            end
+        end
+    end
+
+    return true -- Successfully loaded and applied a custom image config
 end
 
 function DisplayWidget:update()
@@ -507,37 +643,41 @@ function DisplayWidget:paintTo(bb, x, y)
     end
 end
 
-function DisplayWidget:update()
-    local time_text   = TimeUtils.getTimeText(self.now, self.props.clock_format)
-    local date_text   = TimeUtils.getDateText(self.now, true)
-    local status_text = StatusUtils.getStatusText()
-    
-    local wifi_text   = StatusUtils.getWifiStatusText()
-    local memory_text = StatusUtils.getMemoryStatusText() or ""
-    
-    local batt_format = self.props.battery_widget and self.props.battery_widget.format or "both"
-    local batt_text   = StatusUtils.getBatteryText(batt_format)
 
-    if self.time_widget.text   ~= time_text   then self.time_widget:setText(time_text)     end
-    if self.date_widget.text   ~= date_text   then self.date_widget:setText(date_text)     end
-    if self.status_widget.text ~= status_text then self.status_widget:setText(status_text) end
+-- function DisplayWidget:refresh()
+--     -- Sync flags with current props/settings
+--     local is_dark = isDisplayInverted(self.props)
+--     local system_night = G_reader_settings:isTrue("night_mode")
+--     self.apply_manual_inversion = (is_dark == true and system_night == false)
     
-    if self.wifi_widget.text    ~= wifi_text   then self.wifi_widget:setText(wifi_text)    end
-    if self.memory_widget.text  ~= memory_text then self.memory_widget:setText(memory_text) end
-    if self.battery_widget.text ~= batt_text   then self.battery_widget:setText(batt_text)  end
-end
+--     self.invert_png_overlay = true
+--     if self.props.png_overlay and self.props.png_overlay.invert_with_night_mode == false then
+--         self.invert_png_overlay = false
+--     end
 
+--     self.now = os.time()
+--     self:update()
+
+--     if type(self.cyclePngOverlay) == "function" then
+--         self:cyclePngOverlay()
+--     end
+
+--     local frm = self.props.full_refresh_minutes
+--     if frm and frm > 0 then
+--         self.full_refresh_counter = self.full_refresh_counter + 1
+--         if self.full_refresh_counter >= frm then
+--             self.full_refresh_counter = 0
+--             UIManager:setDirty("all", "full")
+--             return
+--         end
+--     end
+
+--     UIManager:setDirty("all", "ui")
+-- end
 
 function DisplayWidget:refresh()
-    -- Sync flags with current props/settings
-    local is_dark = isDisplayInverted(self.props)
-    local system_night = G_reader_settings:isTrue("night_mode")
-    self.apply_manual_inversion = (is_dark == true and system_night == false)
-    
-    self.invert_png_overlay = true
-    if self.props.png_overlay and self.props.png_overlay.invert_with_night_mode == false then
-        self.invert_png_overlay = false
-    end
+    -- Ensure flags stay synced if user changes night mode via gestures
+    self:syncStateFlags()
 
     self.now = os.time()
     self:update()
@@ -559,6 +699,35 @@ function DisplayWidget:refresh()
     UIManager:setDirty("all", "ui")
 end
 
+function DisplayWidget:cyclePngOverlay()
+    local o = self.base_props and self.base_props.png_overlay
+    if not o or not o.enabled or o.mode ~= "cycle" then return end
+    
+    local files = self:getPngFileList()
+    if not files or #files == 0 then return end
+    
+    self.png_cycle_counter = self.png_cycle_counter + 1
+    if self.png_cycle_counter >= self:getCycleMinutes() then
+        self.png_cycle_counter = 0
+        self.png_cycle_index   = self.png_cycle_index + 1
+        if self.png_cycle_index > #files then self.png_cycle_index = 1 end
+        
+        -- The image changed. Store previous state, then check for new configs
+        local had_custom = self._using_custom_config
+        self._using_custom_config = self:applyImageProps()
+        self:syncStateFlags()
+        
+        self:updatePngOverlayWidget()
+
+        -- If we loaded a custom config, OR if we just dropped one (transitioning back to normal)
+        -- We must force the UI to re-render the layout and font sizes dynamically.
+        if self._using_custom_config or had_custom then
+            self:render()
+        end
+        
+        UIManager:setDirty("all", self:isFullRefreshOnCycle() and "full" or "ui")
+    end
+end
 
 function DisplayWidget:onShow()        return self:autoRefresh() end
 
@@ -686,20 +855,20 @@ function DisplayWidget:isFullRefreshOnCycle()
     return o and o.full_refresh_on_cycle == true
 end
 
-function DisplayWidget:cyclePngOverlay()
-    local o = self.props and self.props.png_overlay
-    if not o or not o.enabled or o.mode ~= "cycle" then return end
-    local files = self:getPngFileList()
-    if not files or #files == 0 then return end
-    self.png_cycle_counter = self.png_cycle_counter + 1
-    if self.png_cycle_counter >= self:getCycleMinutes() then
-        self.png_cycle_counter = 0
-        self.png_cycle_index   = self.png_cycle_index + 1
-        if self.png_cycle_index > #files then self.png_cycle_index = 1 end
-        self:updatePngOverlayWidget()
-        UIManager:setDirty("all", self:isFullRefreshOnCycle() and "full" or "ui")
-    end
-end
+-- function DisplayWidget:cyclePngOverlay()
+--     local o = self.props and self.props.png_overlay
+--     if not o or not o.enabled or o.mode ~= "cycle" then return end
+--     local files = self:getPngFileList()
+--     if not files or #files == 0 then return end
+--     self.png_cycle_counter = self.png_cycle_counter + 1
+--     if self.png_cycle_counter >= self:getCycleMinutes() then
+--         self.png_cycle_counter = 0
+--         self.png_cycle_index   = self.png_cycle_index + 1
+--         if self.png_cycle_index > #files then self.png_cycle_index = 1 end
+--         self:updatePngOverlayWidget()
+--         UIManager:setDirty("all", self:isFullRefreshOnCycle() and "full" or "ui")
+--     end
+-- end
 
 function DisplayWidget:createPngOverlayWidget()
     local png_path, res_type = self:getCurrentPngPathAndType()
