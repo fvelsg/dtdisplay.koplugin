@@ -81,7 +81,7 @@ return {
 
     -- CLOCK & DISPLAY --
     clock_format = nil,  -- "24", "12", or "follow"
-    night_mode   = "night",  -- "night", "normal", or "follow"
+    night_mode   = "normal",  -- "night", "normal", or "follow"
 
 
 }
