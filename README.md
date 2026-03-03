@@ -1,3 +1,8 @@
+# FUTURE FEATURES:
+-  To be possible to include a small text as well;
+-  highlights of the user's books;
+- Possibility of using pngs with different resolutions (distorting or using it the way it is);
+
 # dtdisplay.koplugin (Fork)
 
 A [koreader][1] plugin to display the time and day in a fullscreen widget with images allowed and some other functionalities.
