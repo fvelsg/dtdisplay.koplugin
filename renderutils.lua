@@ -70,6 +70,15 @@ function RenderUtils.renderMemoryWidget(width, font_face)
     }
 end
 
+function RenderUtils.renderCustomTextWidget(text, width, font_face, alignment)
+    return TextBoxWidget:new {
+        text = text or "",
+        face = font_face or Font:getFace("infofont", 24),
+        width = width or Screen:getWidth(),
+        alignment = alignment or "center",
+        transparent = true,
+    }
+end
 
 
 return RenderUtils

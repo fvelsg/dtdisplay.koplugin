@@ -178,15 +178,27 @@ end
 --     status = { x = 0, y =  20, unit = "%",  z = 2, visible = true },
 -- }
 
+-- local DEFAULT_ELEMENTS = {
+--     png     = { x = 0, y =   0, unit = "px", z = 1, visible = true },
+--     date    = { x = 0, y = -20, unit = "%",  z = 2, visible = true },
+--     time    = { x = 0, y =   0, unit = "px", z = 2, visible = true },
+--     status  = { x = 0, y =  20, unit = "%",  z = 2, visible = true },
+--     wifi    = { x = 0, y =  30, unit = "%",  z = 2, visible = false },
+--     battery = { x = 0, y =  35, unit = "%",  z = 2, visible = false },
+--     memory  = { x = 0, y =  40, unit = "%",  z = 2, visible = false },
+-- }
+
 local DEFAULT_ELEMENTS = {
-    png     = { x = 0, y =   0, unit = "px", z = 1, visible = true },
-    date    = { x = 0, y = -20, unit = "%",  z = 2, visible = true },
-    time    = { x = 0, y =   0, unit = "px", z = 2, visible = true },
-    status  = { x = 0, y =  20, unit = "%",  z = 2, visible = true },
-    wifi    = { x = 0, y =  30, unit = "%",  z = 2, visible = false },
-    battery = { x = 0, y =  35, unit = "%",  z = 2, visible = false },
-    memory  = { x = 0, y =  40, unit = "%",  z = 2, visible = false },
+    png         = { x = 0, y =   0, unit = "px", z = 1, visible = true },
+    date        = { x = 0, y = -20, unit = "%",  z = 2, visible = true },
+    time        = { x = 0, y =   0, unit = "px", z = 2, visible = true },
+    status      = { x = 0, y =  20, unit = "%",  z = 2, visible = true },
+    wifi        = { x = 0, y =  30, unit = "%",  z = 2, visible = false },
+    battery     = { x = 0, y =  35, unit = "%",  z = 2, visible = false },
+    memory      = { x = 0, y =  40, unit = "%",  z = 2, visible = false },
+    custom_text = { x = 0, y =  45, unit = "%",  z = 2, visible = false },
 }
+
 
 local DisplayWidget = InputContainer:extend {
     props      = {},
@@ -331,80 +343,14 @@ function DisplayWidget:render()
     local batt_props  = self.props.battery_widget or {}
     local batt_format = batt_props.format or "both"
     self.battery_widget = makeTransparent(RenderUtils.renderBatteryWidget(sw, getFont("battery_widget"), batt_format))
-
-    self.png_file_list      = nil
-    self.png_overlay_widget = self:createPngOverlayWidget()
-
-    self.render_list = {}
-
-    local function addWidget(name, widget)
-        local elem = self.elements[name]
-        if not elem or not elem.visible then return end
-        local size = widget:getSize()
-        table.insert(self.render_list, {
-            widget = widget,
-            px     = toAbsolute(elem.x, sw, size.w, elem.unit),
-            py     = toAbsolute(elem.y, sh, size.h, elem.unit),
-            z      = elem.z,
-            is_png = false,
-        })
-    end
-
-    addWidget("time",    self.time_widget)
-    addWidget("date",    self.date_widget)
-    addWidget("status",  self.status_widget)
-    addWidget("wifi",    self.wifi_widget)
-    addWidget("battery", self.battery_widget)
-    addWidget("memory",  self.memory_widget)
-
-    local png_elem = self.elements["png"]
-    if self.png_overlay_widget and png_elem and png_elem.visible then
-        table.insert(self.render_list, {
-            widget = self.png_overlay_widget,
-            px     = toAbsolute(png_elem.x, sw, sw, png_elem.unit),
-            py     = toAbsolute(png_elem.y, sh, sh, png_elem.unit),
-            z      = png_elem.z,
-            is_png = true,
-        })
-    end
-
-    table.sort(self.render_list, function(a, b) return a.z < b.z end)
-end
-
-function DisplayWidget:render()
-    local sw = Screen:getWidth()
-    local sh = Screen:getHeight()
-
-    -- Robust helper: Checks advanced_settings first, then falls back to status default
-    local function getFont(widget_name)
-        local w_props = self.props[widget_name] or {}
-        local name = w_props.font_name or self.props.status_widget.font_name
-        local size = w_props.font_size or self.props.status_widget.font_size
-        return Font:getFace(name, size)
-    end
-
-    self.time_widget = makeTransparent(RenderUtils.renderTimeWidget(
-        self.now, sw,
-        Font:getFace(self.props.time_widget.font_name, self.props.time_widget.font_size),
-        self.props.clock_format
-    ))
-    self.date_widget = makeTransparent(RenderUtils.renderDateWidget(
-        self.now, sw,
-        Font:getFace(self.props.date_widget.font_name, self.props.date_widget.font_size),
-        true
-    ))
-    self.status_widget = makeTransparent(RenderUtils.renderStatusWidget(
-        sw,
-        Font:getFace(self.props.status_widget.font_name, self.props.status_widget.font_size)
-    ))
-
-    -- Initialize new individual widgets with separate font control
-    self.wifi_widget    = makeTransparent(RenderUtils.renderWifiWidget(sw, getFont("wifi_widget")))
-    self.memory_widget  = makeTransparent(RenderUtils.renderMemoryWidget(sw, getFont("memory_widget")))
     
-    local batt_props  = self.props.battery_widget or {}
-    local batt_format = batt_props.format or "both"
-    self.battery_widget = makeTransparent(RenderUtils.renderBatteryWidget(sw, getFont("battery_widget"), batt_format))
+    local c_props = self.props.custom_text_widget or {}
+    self.custom_text_widget = makeTransparent(RenderUtils.renderCustomTextWidget(
+        c_props.text or "",
+        c_props.width or sw, -- Defaults to full screen width if not set
+        getFont("custom_text_widget"),
+        c_props.alignment or "center"
+    ))
 
     self.png_file_list      = nil
     self.png_overlay_widget = self:createPngOverlayWidget()
@@ -430,6 +376,7 @@ function DisplayWidget:render()
     addWidget("wifi",    self.wifi_widget)
     addWidget("battery", self.battery_widget)
     addWidget("memory",  self.memory_widget)
+    addWidget("custom_text", self.custom_text_widget) -- ADD THIS LINE
 
     local png_elem = self.elements["png"]
     if self.png_overlay_widget and png_elem and png_elem.visible then
@@ -518,6 +465,15 @@ function DisplayWidget:update()
     local batt_props  = self.props.battery_widget or {}
     local batt_format = batt_props.format or "both"
     local batt_text   = StatusUtils.getBatteryText(batt_format)
+    
+    -- Inside DisplayWidget:update()
+    
+    local c_props = self.props.custom_text_widget or {}
+    local c_text  = c_props.text or ""
+    
+    if self.custom_text_widget.text ~= c_text then 
+        self.custom_text_widget:setText(c_text) 
+    end
 
     if self.time_widget.text   ~= time_text   then self.time_widget:setText(time_text)     end
     if self.date_widget.text   ~= date_text   then self.date_widget:setText(date_text)     end
