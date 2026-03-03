@@ -1,199 +1,131 @@
--- -- Template for Per-Image Configuration
--- -- Delete any line or section you don't need to override.
-
--- return {
---     -- ==========================================
---     -- 1. FONT & FORMAT SETTINGS
---     -- ==========================================
---     time_widget = {
---         font_size = 150,
---         font_name = "./fonts/noto/NotoSans-Bold.ttf", -- Leave as nil to use UI default
---     },
---     date_widget = {
---         font_size = 32,
---         font_name = nil,
---     },
---     status_widget = {
---         font_size = 24,
---         font_name = nil,
---     },
---     battery_widget = {
---         font_size = 28,
---         font_name = nil,
---         format    = "percent", -- Options: "percent", "icon", or "both"
---     },
---     wifi_widget = {
---         font_size = 20,
---         font_name = nil,
---     },
---     memory_widget = {
---         font_size = 20,
---         font_name = nil,
---     },
-
---     -- ==========================================
---     -- 2. LAYOUT & POSITIONING (elements)
---     -- ==========================================
---     -- x: Horizontal offset from center (negative = left, positive = right)
---     -- y: Vertical offset from center (negative = up, positive = down)
---     -- z: Layer stack (1 is background, 2 is middle, 3 is top)
---     -- unit: "px" for pixels, "%" for screen percentage
---     -- visible: true or false
-    
---     elements = {
---         png = {
---             visible = true,
---             z = 1,
---             -- PNG usually stays centered at x=0, y=0
---         },
---         time = {
---             x = 0, y = -10, unit = "%", z = 2, visible = true,
---         },
---         date = {
---             x = 0, y = 10, unit = "%", z = 2, visible = true,
---         },
---         status = {
---             visible = false, -- e.g., Hide the combined status bar for this image
---         },
---         battery = {
---             x = -20, y = 30, unit = "%", z = 2, visible = true,
---         },
---         wifi = {
---             x = 0, y = 30, unit = "%", z = 2, visible = true,
---         },
---         memory = {
---             x = 20, y = 30, unit = "%", z = 2, visible = true,
---         },
---     },
-
---     -- ==========================================
---     -- 3. DISPLAY & THEME OVERRIDES
---     -- ==========================================
---     -- Force this specific image to always use 24h or 12h clock
---     clock_format = "follow", -- "24", "12", or "follow"
-
---     -- Force the screen theme when this image is shown
---     night_mode = "follow", -- "night", "normal", or "follow"
-
---     png_overlay = {
---         -- Set to false if you want THIS specific image's colors 
---         -- to invert when night mode is active.
---         invert_with_night_mode = true, 
---     },
-
---     -- ==========================================
---     -- 4. HARDWARE BEHAVIOR OVERRIDES
---     -- ==========================================
---     -- Custom brightness for this image (-1 to disable/follow device)
---     widget_brightness = -1,
-
---     -- Clock Orientation
---     rotation = {
---         follow_koreader = true,
---         custom_rotation = 0, -- 0 (Portrait), 1 (Land CW), 2 (Port Invert), 3 (Land CCW)
---     },
-
---     -- Custom suspend rules for this image
---     suspend = {
---         never_suspend = false,
---         custom_timeout_enabled = false,
---         custom_timeout_minutes = 60,
---     },
-
---     -- Full screen e-ink refresh interval (minutes, 0 to disable)
---     full_refresh_minutes = 0,
--- }
-
--- Template for Per-Image Configuration
--- All values here are set to 'nil' or default coordinates so they change NOTHING.
--- Edit only the values you specifically want to override for this image.
+-- =========================================================================
+-- PER-IMAGE CONFIGURATION TEMPLATE
+-- Name this file exactly the same as your image (e.g., background1.lua)
+-- and place it in the exact same folder as the image.
+--
+-- INSTRUCTIONS:
+-- 1. If you leave a value as 'nil' or delete the line entirely, the plugin 
+--    will automatically use your standard KOReader UI settings.
+-- 2. You only need to keep the sections you actively want to change!
+-- =========================================================================
 
 return {
     -- ==========================================
-    -- 1. FONT & FORMAT SETTINGS
+    -- 1. TEXT & FONT SETTINGS
     -- ==========================================
-    -- Leaving these as 'nil' makes them follow your main UI settings.
-    time_widget = {
-        font_size = nil,
-        font_name = nil, 
+    
+    -- The brand new Custom Text Widget!
+    custom_text_widget = {
+        text      = "Your custom quote or label goes here!", 
+        font_size = 32,             -- Number: Size of the font
+        font_name = nil,            -- String: Path to font (e.g., "./fonts/noto/NotoSans-Bold.ttf")
+        width     = 400,            -- Number: Width in pixels. Text wraps automatically. 'nil' = full screen.
+        alignment = "center",       -- String: "left", "center", or "right"
     },
+
+    time_widget = {
+        font_size = nil,            
+        font_name = nil,            
+    },
+    
     date_widget = {
         font_size = nil,
         font_name = nil,
     },
+    
     status_widget = {
         font_size = nil,
         font_name = nil,
     },
+    
     battery_widget = {
         font_size = nil,
         font_name = nil,
-        format    = nil, -- e.g., "percent", "icon", or "both"
+        format    = "both",         -- String: "percent" (100%), "icon" (🔋), or "both" (🔋 100%)
     },
+    
     wifi_widget = {
         font_size = nil,
         font_name = nil,
     },
+    
     memory_widget = {
         font_size = nil,
         font_name = nil,
     },
 
     -- ==========================================
-    -- 2. LAYOUT & POSITIONING (elements)
+    -- 2. LAYOUT & POSITIONING (The 'elements' block)
     -- ==========================================
-    -- These are the exact default coordinates. 
-    -- Change them to move things around just for this image.
+    -- This controls where things appear on the screen.
+    --   visible: true (show) or false (hide)
+    --   z:       Layering. 1 is background, 2 is middle, 3 is top.
+    --   unit:    "px" (pixels from center) or "%" (percentage from center)
+    --   x:       Horizontal movement (negative = left, positive = right)
+    --   y:       Vertical movement (negative = up, positive = down)
+    
     elements = {
         png = {
-            x = 0, y = 0, unit = "px", z = 1, visible = true 
+            visible = true, z = 1, unit = "px", x = 0, y = 0,
         },
         time = {
-            x = 0, y = 0, unit = "px", z = 2, visible = true,
+            visible = true, z = 2, unit = "px", x = 0, y = 0,
         },
         date = {
-            x = 0, y = -20, unit = "%", z = 2, visible = true,
+            visible = true, z = 2, unit = "%", x = 0, y = -20,
         },
         status = {
-            x = 0, y = 20, unit = "%", z = 2, visible = true,
+            visible = true, z = 2, unit = "%", x = 0, y = 20,
         },
-        -- The individual widgets are hidden by default
+        custom_text = {
+            visible = false, z = 2, unit = "%", x = 0, y = 45,
+        },
         wifi = {
-            x = 0, y = 30, unit = "%", z = 2, visible = false,
+            visible = false, z = 2, unit = "%", x = 0, y = 30,
         },
         battery = {
-            x = 0, y = 35, unit = "%", z = 2, visible = false,
+            visible = false, z = 2, unit = "%", x = 0, y = 35,
         },
         memory = {
-            x = 0, y = 40, unit = "%", z = 2, visible = false,
+            visible = false, z = 2, unit = "%", x = 0, y = 40,
         },
     },
 
     -- ==========================================
     -- 3. DISPLAY & THEME OVERRIDES
     -- ==========================================
-    clock_format = nil, -- e.g., "24", "12", or "follow"
-    night_mode   = nil, -- e.g., "night", "normal", or "follow"
+    
+    -- Force a specific clock format for this image
+    clock_format = "follow",        -- String: "24", "12", or "follow" (follows KOReader system setting)
+
+    -- Force a specific background theme for this image
+    night_mode   = "follow",        -- String: "night" (dark), "normal" (light), or "follow"
 
     png_overlay = {
-        invert_with_night_mode = nil, -- e.g., true or false
+        -- Do you want the PNG colors to flip when the screen goes dark?
+        invert_with_night_mode = false, -- Boolean: true or false
     },
 
     -- ==========================================
     -- 4. HARDWARE BEHAVIOR OVERRIDES
     -- ==========================================
-    widget_brightness = -1,
+    
+    -- Force a specific screen brightness for this image
+    widget_brightness = -1,         -- Number: 0 to 24 (depends on device). -1 disables this feature.
 
+    -- Force the screen to rotate when this image appears
     rotation = {
-        follow_koreader = nil,
-        custom_rotation = nil, 
+        follow_koreader = true,     -- Boolean: true or false
+        custom_rotation = 0,        -- Number: 0 (Portrait), 1 (Landscape CW), 2 (Portrait Inverted), 3 (Landscape CCW)
     },
 
+    -- Prevent the e-reader from sleeping while this image is shown
     suspend = {
-        never_suspend          = nil,
-        custom_timeout_enabled = nil,
-        custom_timeout_minutes = nil,
+        never_suspend          = false, -- Boolean: true (never sleep) or false (allow sleep)
+        custom_timeout_enabled = false, -- Boolean: true (use custom timer below) or false
+        custom_timeout_minutes = 60,    -- Number: minutes before sleeping
     },
 
-    full_refresh_minutes = nil,
+    -- Force a full e-ink screen flash to clear ghosting
+    full_refresh_minutes = 0,       -- Number: minutes between full flashes. 0 disables this feature.
 }
