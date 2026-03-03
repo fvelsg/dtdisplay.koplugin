@@ -22,7 +22,7 @@ return {
     -- To use a custom rotation, set follow_koreader = false AND set custom_rotation.
     -- custom_rotation values: 0 = portrait, 1 = landscape CW, 2 = portrait inverted, 3 = landscape CCW
     rotation = {
-        follow_koreader = "false",   -- true or false
+        follow_koreader = false,   -- true or false
         custom_rotation = 0,   -- 0, 1, 2, or 3
     },
 
@@ -35,7 +35,7 @@ return {
     },
 
     png_overlay = {
-        enabled                  = true,  -- true or false
+        enabled                  = nil,  -- true or false
         mode                     = nil,  -- "single" or "cycle"
         
         -- Single mode paths (portrait and landscape)

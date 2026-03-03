@@ -1,3 +1,4 @@
+-- main.lua
 local Dispatcher = require("dispatcher")
 local DisplayWidget = require("displaywidget")
 local DataStorage = require("datastorage")
@@ -311,7 +312,7 @@ function DtDisplay:addToMainMenu(menu_items)
         text = _("Time & Day clock"),
         sorting_hint = "screen",
         callback = function()
-            UIManager:show(DisplayWidget:new { props = self:getEffectiveProps() })
+            UIManager:show(DisplayWidget:new { props = self:getEffectiveProps(), plugin_dir = PLUGIN_DIR })
         end,
     }
 
@@ -324,7 +325,7 @@ function DtDisplay:addToMainMenu(menu_items)
                 text = _("Launch"),
                 separator = true,
                 callback = function()
-                    UIManager:show(DisplayWidget:new { props = self:getEffectiveProps() })
+                    UIManager:show(DisplayWidget:new { props = self:getEffectiveProps(), plugin_dir = PLUGIN_DIR })
                 end,
             },
             {
@@ -1196,11 +1197,11 @@ function DtDisplay:setStatuslineFontSize(font_size)
 end
 
 function DtDisplay:showDateTimeWidget()
-    UIManager:show(DisplayWidget:new {})
+    UIManager:show(DisplayWidget:new { plugin_dir = PLUGIN_DIR })
 end
 
 function DtDisplay:onDTDisplayLaunch()
-    UIManager:show(DisplayWidget:new { props = self:getEffectiveProps() })
+    UIManager:show(DisplayWidget:new { props = self:getEffectiveProps(), plugin_dir = PLUGIN_DIR })
 end
 
 function DtDisplay:showFontSizeSpinWidget(touchmenu_instance, font_size, callback)

@@ -15,6 +15,7 @@ function RenderUtils.renderTimeWidget(now, width, font_face, clock_format)
         face = font_face or Font:getFace("tfont", 119),
         width = width or Screen:getWidth(),
         alignment = "center",
+        transparent = true,
         bold = true,
     }
 end
@@ -25,6 +26,7 @@ function RenderUtils.renderDateWidget(now, width, font_face, use_locale)
         face = font_face or Font:getFace("infofont", 32),
         width = width or Screen:getWidth(),
         alignment = "center",
+        transparent = true,
     }
 end
 
@@ -34,6 +36,7 @@ function RenderUtils.renderStatusWidget(width, font_face)
         face = font_face or Font:getFace("infofont"),
         width = width or Screen:getWidth(),
         alignment = "center",
+        transparent = true,
     }
 end
 
