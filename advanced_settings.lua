@@ -23,7 +23,7 @@ return {
     -- custom_rotation values: 0 = portrait, 1 = landscape CW, 2 = portrait inverted, 3 = landscape CCW
     rotation = {
         follow_koreader = false,   -- true or false
-        custom_rotation = 0,   -- 0, 1, 2, or 3
+        custom_rotation = 3,   -- 0, 1, 2, or 3
     },
 
     -- SUSPEND BEHAVIOUR --
@@ -35,7 +35,7 @@ return {
     },
 
     png_overlay = {
-        enabled                  = nil,  -- true or false
+        enabled                  = true,  -- true or false
         mode                     = nil,  -- "single" or "cycle"
         
         -- Single mode paths (portrait and landscape)
@@ -63,7 +63,7 @@ return {
 
     -- CLOCK & DISPLAY --
     clock_format = nil,  -- "24", "12", or "follow"
-    night_mode   = nil,  -- "night", "normal", or "follow"
+    night_mode   = "night",  -- "night", "normal", or "follow"
 
 
 }

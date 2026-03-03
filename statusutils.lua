@@ -29,9 +29,9 @@ end
 
 function StatusUtils.getWifiStatusText()
     if NetworkMgr:isWifiOn() then
-        return _("")
+        return _("")
     else
-        return _("")
+        return _("")
     end
 end
 
@@ -45,7 +45,7 @@ function StatusUtils.getMemoryStatusText()
         if rss == nil then return nil end
         -- Convert 4KB pages to MiB
         rss = math.floor(rss * (4096 / 1024 / 1024))
-        return T(_(" %1 MiB"), rss)
+        return T(_(" %1 MiB"), rss)
     end
     -- Returns nil when /proc/self/statm is unavailable
 end

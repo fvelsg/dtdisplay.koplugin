@@ -29,18 +29,18 @@ return {
     -- It will show through the transparent text widgets above it.
     png = {
         x       = 0,
-        y       = -300,
-        unit    = "px",
-        z       = 1,
+        y       = 0,
+        unit    = "%",
+        z       = 3,
         visible = true,
     },
 
     -- Date line — above center
     date = {
         x       = 0,
-        y       = -20,
+        y       = -10,
         unit    = "%",
-        z       = 2,
+        z       = 4,
         visible = true,
     },
 
@@ -56,7 +56,7 @@ return {
     -- Status line (battery · wifi · memory) — below center
     status = {
         x       = 0,
-        y       = 20,
+        y       = 10,
         unit    = "%",
         z       = 2,
         visible = true,

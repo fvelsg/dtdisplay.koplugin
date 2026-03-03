@@ -174,15 +174,13 @@ local DisplayWidget = InputContainer:extend {
     plugin_dir = "",
 }
 
-local function getEffectiveNightMode(props)
-    local setting        = props and props.night_mode or "follow"
+local function isDisplayInverted(props)
+    local setting = props and props.night_mode or "follow"
     local koreader_night = G_reader_settings:isTrue("night_mode")
-    local desired_night
-    if     setting == "night"  then desired_night = true
-    elseif setting == "normal" then desired_night = false
-    else                            desired_night = koreader_night
-    end
-    return desired_night ~= koreader_night
+    
+    if setting == "night" then return true end
+    if setting == "normal" then return false end
+    return koreader_night -- "follow" case
 end
 
 
@@ -227,7 +225,14 @@ function DisplayWidget:init()
 
     self.covers_fullscreen = true
 
-    self.apply_night_inversion = getEffectiveNightMode(self.props)
+    -- Initialize state flags
+    local is_dark = isDisplayInverted(self.props)
+    local system_night = G_reader_settings:isTrue("night_mode")
+    
+    -- We only manually invert if we want a dark screen but the system is in light mode
+    self.apply_manual_inversion = (is_dark == true and system_night == false)
+    
+    -- Should the PNG be inverted? Defaults to true unless explicitly false
     self.invert_png_overlay = true
     if self.props.png_overlay and self.props.png_overlay.invert_with_night_mode == false then
         self.invert_png_overlay = false
@@ -236,7 +241,6 @@ function DisplayWidget:init()
     local elements_path = self.plugin_dir .. "elements.lua"
     local ok, file_elements = pcall(dofile, elements_path)
     if not ok or type(file_elements) ~= "table" then
-        require("logger").warn("DtDisplay: could not load elements.lua:", file_elements)
         file_elements = {}
     end
 
@@ -255,11 +259,11 @@ function DisplayWidget:init()
     self:render()
     UIManager:setDirty("all", "full")
 
+    -- Suspend and Brightness logic remains the same...
     local autosuspend = PluginShare.live_autosuspend
     if autosuspend then
         self.original_autosuspend_timeout = autosuspend.auto_suspend_timeout_seconds
     end
-
     if self.props and self.props.suspend then
         if self.props.suspend.never_suspend then
             SystemUtils.setAutoSuspend(-1)
@@ -267,7 +271,6 @@ function DisplayWidget:init()
             SystemUtils.setAutoSuspend(self.props.suspend.custom_timeout_minutes * 60)
         end
     end
-
     self.original_brightness = nil
     if self.props.widget_brightness and self.props.widget_brightness >= 0 then
         if SystemUtils.hasFrontlight() then
@@ -276,7 +279,6 @@ function DisplayWidget:init()
         end
     end
 end
-
 
 function DisplayWidget:render()
     local sw = Screen:getWidth()
@@ -334,45 +336,125 @@ function DisplayWidget:render()
 end
 
 
+-- function DisplayWidget:paintTo(bb, x, y)
+--     local sw = Screen:getWidth()
+--     local sh = Screen:getHeight()
+    
+--     -- Are we supposed to be in a dark UI?
+--     local is_dark = isDisplayInverted(self.props)
+--     -- Is the hardware going to flip the screen at the very end?
+--     local system_night = G_reader_settings:isTrue("night_mode")
+
+--     -- 1. Start with a clean white background
+--     bb:paintRect(x, y, sw, sh, Blitbuffer.COLOR_WHITE)
+
+--     -- 2. Separate PNG from text widgets
+--     local png_item = nil
+--     for _, item in ipairs(self.render_list) do
+--         if item.is_png then png_item = item; break end
+--     end
+
+--     -- 3. Paint all text widgets first
+--     for _, item in ipairs(self.render_list) do
+--         if not item.is_png then
+--             item.widget:paintTo(bb, x + item.px, y + item.py)
+--         end
+--     end
+
+--     -- 4. Paint the PNG with proper night mode logic
+--     if is_dark then
+--         if system_night then
+--             -- SCENARIO A: HARDWARE NIGHT MODE
+--             -- The system will invert everything on the screen automatically.
+--             if png_item then
+--                 if not self.invert_png_overlay then
+--                     -- User wants Original Image with Dark Transparent Background.
+--                     -- TRICK: Invert the target area, paint image, then invert back.
+--                     -- When the hardware does the final flip, the image returns to normal, and the transparent background goes dark.
+--                     local pw, ph = png_item.widget:getSize().w, png_item.widget:getSize().h
+--                     local px, py = x + png_item.px, y + png_item.py
+                    
+--                     bb:invertRect(px, py, pw, ph)
+--                     png_item.widget:paintTo(bb, px, py)
+--                     bb:invertRect(px, py, pw, ph)
+--                 else
+--                     -- User wants Inverted Image with Dark Background.
+--                     -- Paint normally. The hardware will invert it for us.
+--                     png_item.widget:paintTo(bb, x + png_item.px, y + png_item.py)
+--                 end
+--             end
+--         else
+--             -- SCENARIO B: SOFTWARE NIGHT MODE (Plugin only)
+--             -- We must flip the colors manually.
+--             if png_item then
+--                 if not self.invert_png_overlay then
+--                     -- User wants Original Image with Dark Transparent Background.
+--                     -- Invert the screen to black FIRST, then paint the image on top.
+--                     bb:invertRect(x, y, sw, sh)
+--                     png_item.widget:paintTo(bb, x + png_item.px, y + png_item.py)
+--                 else
+--                     -- User wants Inverted Image with Dark Background.
+--                     -- Paint the image first, THEN invert the entire screen.
+--                     png_item.widget:paintTo(bb, x + png_item.px, y + png_item.py)
+--                     bb:invertRect(x, y, sw, sh)
+--                 end
+--             else
+--                 -- No image, just invert the text/background
+--                 bb:invertRect(x, y, sw, sh)
+--             end
+--         end
+--     else
+--         -- SCENARIO C: LIGHT MODE
+--         -- Everything is normal. Just paint the image.
+--         if png_item then
+--             png_item.widget:paintTo(bb, x + png_item.px, y + png_item.py)
+--         end
+--     end
+-- end
+
 function DisplayWidget:paintTo(bb, x, y)
     local sw = Screen:getWidth()
     local sh = Screen:getHeight()
+    
+    local is_dark = isDisplayInverted(self.props)
+    local system_night = G_reader_settings:isTrue("night_mode")
+    
+    -- Are we manually forcing dark mode while the hardware is in light mode?
+    local software_dark = (is_dark and not system_night)
+    
+    -- Do we need to "pre-invert" the PNG so the final flip restores its true colors?
+    local needs_png_pre_inversion = (is_dark and not self.invert_png_overlay)
 
-    -- 1. Start with a clean slate
+    -- 1. Start with a clean white background
     bb:paintRect(x, y, sw, sh, Blitbuffer.COLOR_WHITE)
 
-    -- Identify the PNG item if it exists
-    local png_item = nil
+    -- 2. Paint ALL items in their correct Z-index order
     for _, item in ipairs(self.render_list) do
-        if item.is_png then png_item = item; break end
-    end
-
-    -- 2. CASE: Night mode is ON, but we must NOT invert the PNG
-    if self.apply_night_inversion and png_item and not self.invert_png_overlay then
-        -- Paint only text/UI elements first
-        for _, item in ipairs(self.render_list) do
-            if not item.is_png then
+        if item.is_png then
+            if needs_png_pre_inversion then
+                -- TRICK: Invert the target area, paint image, then invert back.
+                -- This guarantees transparent parts go dark while colors stay normal 
+                -- after the final screen flip.
+                local pw, ph = item.widget:getSize().w, item.widget:getSize().h
+                local px, py = x + item.px, y + item.py
+                
+                bb:invertRect(px, py, pw, ph)
+                item.widget:paintTo(bb, px, py)
+                bb:invertRect(px, py, pw, ph)
+            else
+                -- Just paint it normally
                 item.widget:paintTo(bb, x + item.px, y + item.py)
             end
-        end
-        -- Invert the background and text ONLY (PNG is not there yet)
-        bb:invertRect(x, y, sw, sh)
-        -- Now paint the PNG on top of the inverted background (it stays original)
-        png_item.widget:paintTo(bb, x + png_item.px, y + png_item.py)
-
-    -- 3. CASE: Night mode is ON and we SHOULD invert the PNG (or no PNG exists)
-    elseif self.apply_night_inversion then
-        for _, item in ipairs(self.render_list) do
+        else
+            -- Paint text widgets (Time, Date, Status) normally
             item.widget:paintTo(bb, x + item.px, y + item.py)
         end
-        -- Invert EVERYTHING including the PNG
-        bb:invertRect(x, y, sw, sh)
+    end
 
-    -- 4. CASE: Normal mode (Night mode OFF)
-    else
-        for _, item in ipairs(self.render_list) do
-            item.widget:paintTo(bb, x + item.px, y + item.py)
-        end
+    -- 3. Final Software Inversion (Only if the plugin is doing the dark mode manually)
+    -- If system_night is true, KOReader's hardware driver does this step automatically.
+    if software_dark then
+        bb:invertRect(x, y, sw, sh)
     end
 end
 
@@ -388,6 +470,16 @@ end
 
 
 function DisplayWidget:refresh()
+    -- Sync flags with current props/settings
+    local is_dark = isDisplayInverted(self.props)
+    local system_night = G_reader_settings:isTrue("night_mode")
+    self.apply_manual_inversion = (is_dark == true and system_night == false)
+    
+    self.invert_png_overlay = true
+    if self.props.png_overlay and self.props.png_overlay.invert_with_night_mode == false then
+        self.invert_png_overlay = false
+    end
+
     self.now = os.time()
     self:update()
 
