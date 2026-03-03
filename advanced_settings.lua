@@ -52,8 +52,23 @@ return {
         full_refresh_on_cycle  = nil,  -- true = full e-ink refresh on each cycle
         invert_with_night_mode = nil,  -- false = keep PNG uninverted when night mode is on
     },
+    -- INDIVIDUAL STATUS WIDGETS --
+    -- Leave values as nil to inherit from status_widget
+    
     battery_widget = {
-        format = "icon", -- Try "icon" or "both" or "percent"
+        font_size = 50,             -- e.g., slightly larger than the rest
+        font_name = nil,            -- e.g., "./fonts/noto/NotoSans-Bold.ttf"
+        format    = "icon",      -- Options: "percent", "icon", or "both"
+    },
+    
+    wifi_widget = {
+        font_size = 20,             -- e.g., smaller
+        font_name = nil,
+    },
+    
+    memory_widget = {
+        font_size = 20,
+        font_name = nil,
     },
 
     -- WIDGET BRIGHTNESS --

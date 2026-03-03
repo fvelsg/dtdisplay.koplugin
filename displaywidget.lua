@@ -293,9 +293,9 @@ function DisplayWidget:render()
     local sw = Screen:getWidth()
     local sh = Screen:getHeight()
 
-    -- Helper to safely get fonts for the new widgets
+    -- Robust helper: Checks advanced_settings first, then falls back to status default
     local function getFont(widget_name)
-        local w_props = self.props[widget_name] or self.props.status_widget
+        local w_props = self.props[widget_name] or {}
         local name = w_props.font_name or self.props.status_widget.font_name
         local size = w_props.font_size or self.props.status_widget.font_size
         return Font:getFace(name, size)
@@ -316,11 +316,12 @@ function DisplayWidget:render()
         Font:getFace(self.props.status_widget.font_name, self.props.status_widget.font_size)
     ))
 
-    -- Initialize new individual widgets
+    -- Initialize new individual widgets with separate font control
     self.wifi_widget    = makeTransparent(RenderUtils.renderWifiWidget(sw, getFont("wifi_widget")))
     self.memory_widget  = makeTransparent(RenderUtils.renderMemoryWidget(sw, getFont("memory_widget")))
     
-    local batt_format = self.props.battery_widget and self.props.battery_widget.format or "both"
+    local batt_props  = self.props.battery_widget or {}
+    local batt_format = batt_props.format or "both"
     self.battery_widget = makeTransparent(RenderUtils.renderBatteryWidget(sw, getFont("battery_widget"), batt_format))
 
     self.png_file_list      = nil
@@ -360,6 +361,27 @@ function DisplayWidget:render()
     end
 
     table.sort(self.render_list, function(a, b) return a.z < b.z end)
+end
+
+function DisplayWidget:update()
+    local time_text   = TimeUtils.getTimeText(self.now, self.props.clock_format)
+    local date_text   = TimeUtils.getDateText(self.now, true)
+    local status_text = StatusUtils.getStatusText()
+    
+    local wifi_text   = StatusUtils.getWifiStatusText()
+    local memory_text = StatusUtils.getMemoryStatusText() or ""
+    
+    local batt_props  = self.props.battery_widget or {}
+    local batt_format = batt_props.format or "both"
+    local batt_text   = StatusUtils.getBatteryText(batt_format)
+
+    if self.time_widget.text   ~= time_text   then self.time_widget:setText(time_text)     end
+    if self.date_widget.text   ~= date_text   then self.date_widget:setText(date_text)     end
+    if self.status_widget.text ~= status_text then self.status_widget:setText(status_text) end
+    
+    if self.wifi_widget.text    ~= wifi_text   then self.wifi_widget:setText(wifi_text)    end
+    if self.memory_widget.text  ~= memory_text then self.memory_widget:setText(memory_text) end
+    if self.battery_widget.text ~= batt_text   then self.battery_widget:setText(batt_text)  end
 end
 
 
