@@ -228,8 +228,10 @@ function DisplayWidget:init()
     self.covers_fullscreen = true
 
     self.apply_night_inversion = getEffectiveNightMode(self.props)
-    self.invert_png_overlay    = not (self.props.png_overlay
-        and self.props.png_overlay.invert_with_night_mode == false)
+    self.invert_png_overlay = true
+    if self.props.png_overlay and self.props.png_overlay.invert_with_night_mode == false then
+        self.invert_png_overlay = false
+    end
 
     local elements_path = self.plugin_dir .. "elements.lua"
     local ok, file_elements = pcall(dofile, elements_path)
@@ -336,31 +338,43 @@ function DisplayWidget:paintTo(bb, x, y)
     local sw = Screen:getWidth()
     local sh = Screen:getHeight()
 
+    -- 1. Start with a clean slate
     bb:paintRect(x, y, sw, sh, Blitbuffer.COLOR_WHITE)
 
+    -- Identify the PNG item if it exists
     local png_item = nil
     for _, item in ipairs(self.render_list) do
         if item.is_png then png_item = item; break end
     end
 
+    -- 2. CASE: Night mode is ON, but we must NOT invert the PNG
     if self.apply_night_inversion and png_item and not self.invert_png_overlay then
+        -- Paint only text/UI elements first
         for _, item in ipairs(self.render_list) do
             if not item.is_png then
                 item.widget:paintTo(bb, x + item.px, y + item.py)
             end
         end
+        -- Invert the background and text ONLY (PNG is not there yet)
         bb:invertRect(x, y, sw, sh)
+        -- Now paint the PNG on top of the inverted background (it stays original)
         png_item.widget:paintTo(bb, x + png_item.px, y + png_item.py)
+
+    -- 3. CASE: Night mode is ON and we SHOULD invert the PNG (or no PNG exists)
+    elseif self.apply_night_inversion then
+        for _, item in ipairs(self.render_list) do
+            item.widget:paintTo(bb, x + item.px, y + item.py)
+        end
+        -- Invert EVERYTHING including the PNG
+        bb:invertRect(x, y, sw, sh)
+
+    -- 4. CASE: Normal mode (Night mode OFF)
     else
         for _, item in ipairs(self.render_list) do
             item.widget:paintTo(bb, x + item.px, y + item.py)
         end
-        if self.apply_night_inversion then
-            bb:invertRect(x, y, sw, sh)
-        end
     end
 end
-
 
 function DisplayWidget:update()
     local time_text   = TimeUtils.getTimeText(self.now, self.props.clock_format)
@@ -551,8 +565,9 @@ function DisplayWidget:updatePngOverlayWidget()
     if not png_path then return end
     local ss = Screen:getSize()
 
-    if self.png_overlay_widget and self.png_overlay_widget.free then
-        self.png_overlay_widget:free()
+    -- FIX: Call free() on the internal buffer, not just the widget table
+    if self.png_overlay_widget and self.png_overlay_widget._img_bb then
+        self.png_overlay_widget._img_bb:free() 
     end
 
     local new_widget = loadPngWidget(

@@ -1,4 +1,3 @@
--- main.lua
 local Dispatcher = require("dispatcher")
 local DisplayWidget = require("displaywidget")
 local DataStorage = require("datastorage")

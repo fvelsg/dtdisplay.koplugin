@@ -1,4 +1,3 @@
--- _meta.lua
 local _ = require("gettext")
 return {
     name = "dtdisplay",
