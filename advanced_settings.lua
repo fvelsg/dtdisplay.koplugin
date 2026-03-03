@@ -22,8 +22,8 @@ return {
     -- To use a custom rotation, set follow_koreader = false AND set custom_rotation.
     -- custom_rotation values: 0 = portrait, 1 = landscape CW, 2 = portrait inverted, 3 = landscape CCW
     rotation = {
-        follow_koreader = "false",   -- true or false
-        custom_rotation = 0,   -- 0, 1, 2, or 3
+        follow_koreader = true,   -- true or false
+        custom_rotation = 3,   -- 0, 1, 2, or 3
     },
 
     -- SUSPEND BEHAVIOUR --
@@ -52,6 +52,24 @@ return {
         full_refresh_on_cycle  = nil,  -- true = full e-ink refresh on each cycle
         invert_with_night_mode = nil,  -- false = keep PNG uninverted when night mode is on
     },
+    -- INDIVIDUAL STATUS WIDGETS --
+    -- Leave values as nil to inherit from status_widget
+    
+    battery_widget = {
+        font_size = 50,             -- e.g., slightly larger than the rest
+        font_name = nil,            -- e.g., "./fonts/noto/NotoSans-Bold.ttf"
+        format    = "icon",      -- Options: "percent", "icon", or "both"
+    },
+    
+    wifi_widget = {
+        font_size = 20,             -- e.g., smaller
+        font_name = nil,
+    },
+    
+    memory_widget = {
+        font_size = 20,
+        font_name = nil,
+    },
 
     -- WIDGET BRIGHTNESS --
     -- Set to -1 to disable (use device default), or 0–24 (device max may vary)
@@ -63,7 +81,7 @@ return {
 
     -- CLOCK & DISPLAY --
     clock_format = nil,  -- "24", "12", or "follow"
-    night_mode   = nil,  -- "night", "normal", or "follow"
+    night_mode   = "normal",  -- "night", "normal", or "follow"
 
 
 }

@@ -67,6 +67,10 @@ function DtDisplay:initLuaSettings()
                 custom_timeout_minutes = 60,
             },
         })
+        -- Migration: ensure per-image config setting exists
+        if self.local_storage.data.png_overlay.use_image_config == nil then
+            self.local_storage.data.png_overlay.use_image_config = false
+        end
         self.local_storage:flush()
     end
 
@@ -166,142 +170,7 @@ function DtDisplay:initLuaSettings()
         self.local_storage:flush()
     end
 end
-----
 
--- function DtDisplay:addToMainMenu(menu_items)
---     menu_items.dtdisplay = {
---         text = _("Time & Day"),
---         sorting_hint = "more_tools",
---         sub_item_table = {
---             {
---                 text = _("Launch"),
---                 separator = true,
---                 callback = function()
---                     UIManager:show(DisplayWidget:new { props = self.settings })
---                 end,
---             },
---             {
---                 text = _("Date widget font"),
---                 sub_item_table = self:getFontMenuList(
---                     {
---                         font_callback = function(font_name)
---                             self:setDateFont(font_name)
---                         end,
---                         font_size_callback = function(font_size)
---                             self:setDateFontSize(font_size)
---                         end,
---                         font_size_func = function()
---                             return self.settings.date_widget.font_size
---                         end,
---                         checked_func = function(font)
---                             return font == self.settings.date_widget.font_name
---                         end
---                     }
---                 ),
---             },
---             {
---                 text = _("Time widget font"),
---                 sub_item_table = self:getFontMenuList(
---                     {
---                         font_callback = function(font_name)
---                             self:setTimeFont(font_name)
---                         end,
---                         font_size_callback = function(font_size)
---                             self:setTimeFontSize(font_size)
---                         end,
---                         font_size_func = function()
---                             return self.settings.time_widget.font_size
---                         end,
---                         checked_func = function(font)
---                             return font == self.settings.time_widget.font_name
---                         end
---                     }
---                 ),
---             },
---             {
---                 text = _("Status line font"),
---                 sub_item_table = self:getFontMenuList(
---                     {
---                         font_callback = function(font_name)
---                             self:setStatuslineFont(font_name)
---                         end,
---                         font_size_callback = function(font_size)
---                             self:setStatuslineFontSize(font_size)
---                         end,
---                         font_size_func = function()
---                             return self.settings.status_widget.font_size
---                         end,
---                         checked_func = function(font)
---                             return font == self.settings.status_widget.font_name
---                         end
---                     }
---                 ),
---             },
---             {
---                 text = _("Clock orientation"),
---                 separator = false,
---                 sub_item_table = self:getRotationMenuList(),
---             },
---             {
---                 text = _("Clock format"),
---                 separator = false,
---                 sub_item_table = self:getClockFormatMenuList(),
---             },
---             {
---                 text = _("Night mode"),
---                 separator = false,
---                 sub_item_table = self:getNightModeMenuList(),
---             },
---             {
---                 text = _("Suspend settings"),
---                 separator = false,
---                 sub_item_table = self:getSuspendMenuList(),
---             },
---             {
---                 text = _("PNG overlay"),
---                 separator = false,
---                 sub_item_table = self:getPngOverlayMenuList(),
---             },
---             {
---                 text = _("Widget Brightness"),
---                 separator = false,
---                 keep_menu_open = true,
---                 callback = function(touchmenu_instance)
---                     self:showBrightnessSpinWidget(touchmenu_instance, self.settings.widget_brightness, function(new_val)
---                         self.settings.widget_brightness = new_val
---                         -- Save the setting immediately when changed
---                         self.local_storage:reset(self.settings)
---                         self.local_storage:flush()
---                     end)
---                 end,
---             },
---             {
---                 text_func = function()
---                     local total = self.settings.full_refresh_minutes or 0
---                     if total == 0 then
---                         return _("Full refresh: disabled")
---                     end
-
---                     local h = math.floor(total / 60)
---                     local m = total % 60
---                     if h == 0 then 
---                         return T(_("Full refresh: every %1 min"), m)
---                     elseif m == 0 then
---                         return T(_("Full refresh: every %1 h"), h)
---                     else
---                         return T(_("Full refresh: every %1 h %2 min"), h, m)
---                     end
---                 end,
-                
---                 keep_menu_open = true,
-            
---                 callback = function(touchmenu_instance)
---                     self:showFullRefreshSpinWidget(touchmenu_instance)
---                 end,
---             },
---         },
---     }
--- end
 
 
 
@@ -311,7 +180,7 @@ function DtDisplay:addToMainMenu(menu_items)
         text = _("Time & Day clock"),
         sorting_hint = "screen",
         callback = function()
-            UIManager:show(DisplayWidget:new { props = self:getEffectiveProps() })
+            UIManager:show(DisplayWidget:new { props = self:getEffectiveProps(), plugin_dir = PLUGIN_DIR })
         end,
     }
 
@@ -324,7 +193,7 @@ function DtDisplay:addToMainMenu(menu_items)
                 text = _("Launch"),
                 separator = true,
                 callback = function()
-                    UIManager:show(DisplayWidget:new { props = self:getEffectiveProps() })
+                    UIManager:show(DisplayWidget:new { props = self:getEffectiveProps(), plugin_dir = PLUGIN_DIR })
                 end,
             },
             {
@@ -896,6 +765,17 @@ function DtDisplay:getPngOverlayMenuList()
         end,
         separator = true,
     })
+    table.insert(menu_list, {
+        text = _("Use per-image config files (*.lua)"),
+        checked_func = function()
+            return self.settings.png_overlay.use_image_config == true
+        end,
+        callback = function()
+            self.settings.png_overlay.use_image_config = not self.settings.png_overlay.use_image_config
+            self:savePngOverlaySettings()
+        end,
+        separator = true,
+    })
 
     return menu_list
 end
@@ -1196,11 +1076,11 @@ function DtDisplay:setStatuslineFontSize(font_size)
 end
 
 function DtDisplay:showDateTimeWidget()
-    UIManager:show(DisplayWidget:new {})
+    UIManager:show(DisplayWidget:new { plugin_dir = PLUGIN_DIR })
 end
 
 function DtDisplay:onDTDisplayLaunch()
-    UIManager:show(DisplayWidget:new { props = self:getEffectiveProps() })
+    UIManager:show(DisplayWidget:new { props = self:getEffectiveProps(), plugin_dir = PLUGIN_DIR })
 end
 
 function DtDisplay:showFontSizeSpinWidget(touchmenu_instance, font_size, callback)
