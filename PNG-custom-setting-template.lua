@@ -113,11 +113,6 @@ return {
     -- Force a specific screen brightness for this image
     widget_brightness = -1,         -- Number: 0 to 24 (depends on device). -1 disables this feature.
 
-    -- Force the screen to rotate when this image appears
-    rotation = {
-        follow_koreader = true,     -- Boolean: true or false
-        custom_rotation = 0,        -- Number: 0 (Portrait), 1 (Landscape CW), 2 (Portrait Inverted), 3 (Landscape CCW)
-    },
 
     -- Prevent the e-reader from sleeping while this image is shown
     suspend = {
